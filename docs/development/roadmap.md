@@ -76,12 +76,12 @@ PREPARED state transition that `programs/play_tone.cyr` needs.
 | 2 | Full `SNDRV_PCM_IOCTL_HW_PARAMS` struct (608 B) — interval / mask arrays packed | Done — `src/alsa.cyr` |
 | 3 | `SNDRV_PCM_IOCTL_HW_REFINE` for capability query | Done — `audio_query_caps`, `audio_can_set_params`, `programs/caps.cyr` PASS on real HW |
 | 4 | `vani_format_negotiate(d, preferred)` — picks closest supported format | Done — `src/device.cyr`; quality walk S32→S24→S16→S8→U8 |
-| 5 | Onboard audio integration test (real PCM round-trip via `play_tone.cyr`) | Builds clean; user runs to verify audible output |
-| 6 | USB audio integration test | Not started |
-| 7 | HDMI audio integration test | Not started |
-| 8 | `tests/bcyr/vani.bcyr` — CPU-only benches for ring + format math | Not started |
-| 9 | Latency / throughput / underrun-rate measurements (CSV history) | Not started |
-| 10 | Tag `0.2.0` | Not started |
+| 5 | Onboard audio integration test (real PCM round-trip) | Done — `programs/throughput.cyr` 9600/9600 frames, 0 xruns on `pcmC1D0p` |
+| 6 | USB audio integration test | Not started — needs different HW |
+| 7 | HDMI audio integration test | Not started — needs different HW |
+| 8 | `tests/bcyr/vani.bcyr` — CPU-only benches for ring + format math | Done — 13 benches, baseline in `bench-history.csv` |
+| 9 | Latency / throughput / underrun-rate measurements (CSV history) | Throughput done (`programs/throughput.cyr`); latency + load-driven underrun-rate deferred to v0.4.0 |
+| 10 | Tag `0.2.0` | Pending — items 6/7 are HW-gated (skip) and 9 partially deferred |
 
 ## v0.3.0 — Mixer + yukti adapter
 

@@ -1,0 +1,14 @@
+timestamp,commit,branch,benchmark,estimate_ns
+2026-04-30T18:54:11Z,e031c0d,main,bytes_per_frame,10
+2026-04-30T18:54:11Z,e031c0d,main,frames_to_bytes,13
+2026-04-30T18:54:11Z,e031c0d,main,ms_to_frames,5
+2026-04-30T18:54:11Z,e031c0d,main,alsa_for,3
+2026-04-30T18:54:11Z,e031c0d,main,ring_used,7
+2026-04-30T18:54:11Z,e031c0d,main,ring_write_64b,170
+2026-04-30T18:54:11Z,e031c0d,main,ring_read_64b,311
+2026-04-30T18:54:11Z,e031c0d,main,hwp_init_any,924
+2026-04-30T18:54:11Z,e031c0d,main,hwp_mask_set_value,20
+2026-04-30T18:54:11Z,e031c0d,main,hwp_interval_set_exact,9
+2026-04-30T18:54:11Z,e031c0d,main,hwp_mask_has_bit,8
+2026-04-30T18:54:11Z,e031c0d,main,negotiate_format_pick,11
+2026-04-30T18:54:11Z,e031c0d,main,ring_200ms_playback,83451

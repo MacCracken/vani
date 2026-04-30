@@ -119,6 +119,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   negotiation picker (preferred-supported, fall-back paths,
   empty-mask, quality preference). Total 115 → 146 assertions.
 
+- **#8 — bench harness**: done.
+  - `tests/bcyr/vani.bcyr` — 13 CPU-only benches covering format
+    math (`bytes_per_frame`, `frames_to_bytes`, `ms_to_frames`,
+    `alsa_for`), ring buffer (`ring_used`, `ring_write_64b`,
+    `ring_read_64b`, `ring_200ms_playback`), HW_PARAMS struct
+    manipulation (`hwp_init_any`, `hwp_mask_set_value`,
+    `hwp_interval_set_exact`, `hwp_mask_has_bit`), and
+    negotiation (`negotiate_format_pick`).
+  - `bench-history.csv` — baseline numbers as of e031c0d.
+    Schema matches mabda: `timestamp,commit,branch,benchmark,
+    estimate_ns`. Each `cyrius bench tests/bcyr/vani.bcyr`
+    emits a `CSV:` line per bench for easy appending.
+  - Hot-path numbers (min ns): `alsa_for` 3, `ms_to_frames` 5,
+    `ring_used` 7, `hwp_mask_has_bit` 8, `negotiate_format_pick`
+    11, `ring_write_64b` 170, `ring_read_64b` 311,
+    `hwp_init_any` 924, `ring_200ms_playback` 83451.
+
+- **#9 — throughput / xrun (partial)**: throughput done.
+  `programs/throughput.cyr` plays 200 ms of silence and reports
+  frames-actually-written, vani_play wall time, drain wall time,
+  effective fps, and final xrun count. Real-HW PASS on
+  `pcmC1D0p`: 9600/9600 frames, 178746162 ns play wall,
+  200111747 ns total (≈ realtime), 0 xruns. Latency-from-
+  write-to-audible (needs external loopback) and xrun-rate-
+  under-load deferred to v0.4.0 alongside configurable period
+  / buffer sizes.
+
+### Fixed (post-audit, v0.2.0)
+
+- **POST-AUDIT-1 (HIGH)** — `SNDRV_PCM_IOCTL_WRITEI_FRAMES` and
+  `READI_FRAMES` had `size=16` baked into the ioctl number, but
+  `struct snd_xferi` is 24 bytes on 64-bit Linux (`result + buf +
+  frames`). Kernel dispatcher matched neither case and fell
+  through to `-ENOTTY (-25)`, breaking every PCM write/read.
+  Carried from upstream `cyrius/lib/audio.cyr`; never noticed
+  there because no consumer exercised the path. Fix bumps both
+  constants by 0x80000 (size shift), grows `var xferi[16]` to
+  `var xferi[24]`, repositions buf/frames to +8/+16, and reads
+  the kernel-written `result` field at +0 for the return value.
+  Pinned by new tests `test_ioctl_size_encoding_matches_struct_size`
+  and `test_ioctl_type_is_A` (16 assertions). Filed in the audit
+  doc under "Post-audit findings". Total suite 146 → 162
+  assertions.
+
 ### Architecture
 
 - vani is now the single audio authority in stdlib (mirrors mabda

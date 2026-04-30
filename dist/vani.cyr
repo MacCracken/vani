@@ -73,9 +73,19 @@ fn _audio_devpath(card, device, typ) {
 # ================================================================
 
 # SNDRV_PCM_IOCTL_* numbers (from Linux UAPI sound/asound.h).
-# Encoding: dir(2) | size(14) | type(8) | nr(8). Type='A'=0x41,
-# size=608 for HW_PARAMS / HW_REFINE (same struct), nr=0x10 for
-# REFINE and 0x11 for PARAMS.
+# Encoding: dir(2) | size(14) | type(8) | nr(8). Type='A'=0x41.
+#
+# Sizes encoded in the ioctl number must match `sizeof(struct …)`
+# on the target ABI. The kernel ioctl dispatcher matches the whole
+# command number (incl. size bits) and falls through to -ENOTTY
+# when wrong — this caught us on 2026-04-30 against
+# WRITEI/READI_FRAMES which had size=16 baked in but `struct
+# snd_xferi` is 24 bytes on 64-bit Linux. Verified sizes against
+# `include/uapi/sound/asound.h`:
+#   snd_pcm_hw_params      608 bytes  → 0x260 << 16
+#   snd_pcm_sw_params      136 bytes  → 0x088 << 16
+#   snd_pcm_status         152 bytes  → 0x098 << 16
+#   snd_xferi               24 bytes  → 0x018 << 16
 enum AlsaIoctl {
     SNDRV_PCM_IOCTL_HW_REFINE     = 0xC2604110;
     SNDRV_PCM_IOCTL_HW_PARAMS     = 0xC2604111;
@@ -84,8 +94,8 @@ enum AlsaIoctl {
     SNDRV_PCM_IOCTL_START         = 0x00004142;
     SNDRV_PCM_IOCTL_DROP          = 0x00004143;
     SNDRV_PCM_IOCTL_DRAIN         = 0x00004144;
-    SNDRV_PCM_IOCTL_WRITEI_FRAMES = 0x40104150;
-    SNDRV_PCM_IOCTL_READI_FRAMES  = 0x80104151;
+    SNDRV_PCM_IOCTL_WRITEI_FRAMES = 0x40184150;
+    SNDRV_PCM_IOCTL_READI_FRAMES  = 0x80184151;
     SNDRV_PCM_IOCTL_STATUS        = 0x80984120;
 }
 
@@ -495,17 +505,25 @@ fn audio_drain(dev) {
 # ================================================================
 # Read / Write
 # ================================================================
-# `var xferi[16]` reserves the full 16 bytes the kernel reads — the
-# upstream `audio.cyr` had `var xferi[2]` which writes past the
-# stack slot. Fixed during the v0.1.0 absorb.
+# `struct snd_xferi` is 24 bytes:
+#   +0  result  i64  — kernel writes frames-actually-transferred
+#   +8  buf     ptr  — caller writes sample buffer pointer
+#   +16 frames  u64  — caller writes frames-to-transfer
+# The ioctl return value is 0 on success, negative errno on failure.
+# Frame count is read from the `result` field — NOT from `frames`,
+# which is a pure input that the kernel doesn't touch.
+#
+# Audit 2026-04-30 corrected `var xferi[2]` → `var xferi[16]` but
+# the kernel struct is actually 24 bytes; passing a 16-byte buffer
+# meant the kernel read our `frames` value as a buf pointer and
+# bailed with ENOTTY (-25). Fixed here while wiring v0.2.0 #9
+# throughput. Filed as audit follow-up for the next P(-1) sweep.
 #
 # AUDIO_FRAMES_MAX (defense-in-depth, audit 2026-04-30): cap the
 # frame count we hand to SNDRV_PCM_IOCTL_*I_FRAMES at 256 M frames
 # (~24 h of 192 kHz mono, more than any real session). Mitigates
 # the CVE-2025-40269 class — kernel transfer paths that did
-# narrower-int arithmetic on (frames * bytes_per_frame). A bounded
-# frame count keeps the kernel's product well under 2^32 even for
-# 8-channel 32-bit-per-sample formats.
+# narrower-int arithmetic on (frames * bytes_per_frame).
 
 enum AudioBounds {
     AUDIO_FRAMES_MAX = 268435456;  # 2^28
@@ -518,12 +536,13 @@ enum AudioBounds {
 fn audio_write(dev, buf, frames) {
     if (frames < 0)                { return 0 - 1; }
     if (frames > AUDIO_FRAMES_MAX) { return 0 - 1; }
-    var xferi[16];
-    store64(&xferi, buf);
-    store64(&xferi + 8, frames);
+    var xferi[24];
+    store64(&xferi,      0);       # result (kernel writes here)
+    store64(&xferi + 8,  buf);     # buf
+    store64(&xferi + 16, frames);  # frames-in
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xferi);
     if (r < 0) { return r; }
-    return load64(&xferi + 8);
+    return load64(&xferi);  # result field — frames-actually-written
 }
 
 # Read interleaved frames from capture device.
@@ -533,12 +552,13 @@ fn audio_write(dev, buf, frames) {
 fn audio_read(dev, buf, frames) {
     if (frames < 0)                { return 0 - 1; }
     if (frames > AUDIO_FRAMES_MAX) { return 0 - 1; }
-    var xferi[16];
-    store64(&xferi, buf);
-    store64(&xferi + 8, frames);
+    var xferi[24];
+    store64(&xferi,      0);       # result (kernel writes here)
+    store64(&xferi + 8,  buf);     # buf
+    store64(&xferi + 16, frames);  # frames-in
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_READI_FRAMES, &xferi);
     if (r < 0) { return r; }
-    return load64(&xferi + 8);
+    return load64(&xferi);  # result field — frames-actually-read
 }
 
 # ================================================================

@@ -296,6 +296,40 @@ fn test_hwp_layout_constants() {
     return 0;
 }
 
+# Pin the size-bits inside each ioctl number. Drift here means the
+# kernel will reject with ENOTTY (caught on 2026-04-30 against
+# WRITEI/READI_FRAMES). The size lives in bits 16..29 — extract
+# with (cmd >> 16) & 0x3FFF.
+fn test_ioctl_size_encoding_matches_struct_size() {
+    # HW_PARAMS / HW_REFINE — 608 bytes
+    assert_eq((SNDRV_PCM_IOCTL_HW_PARAMS >> 16) & 16383, 608, "HW_PARAMS=608");
+    assert_eq((SNDRV_PCM_IOCTL_HW_REFINE >> 16) & 16383, 608, "HW_REFINE=608");
+    # SW_PARAMS — 136 bytes
+    assert_eq((SNDRV_PCM_IOCTL_SW_PARAMS >> 16) & 16383, 136, "SW_PARAMS=136");
+    # STATUS — 152 bytes (truncated to fit 14-bit size; older kernels)
+    assert_eq((SNDRV_PCM_IOCTL_STATUS    >> 16) & 16383, 152, "STATUS=152");
+    # WRITEI / READI — 24 bytes (snd_xferi: result+buf+frames)
+    assert_eq((SNDRV_PCM_IOCTL_WRITEI_FRAMES >> 16) & 16383, 24, "WRITEI=24");
+    assert_eq((SNDRV_PCM_IOCTL_READI_FRAMES  >> 16) & 16383, 24, "READI=24");
+    # Direction-only ioctls (no struct) carry size=0
+    assert_eq((SNDRV_PCM_IOCTL_PREPARE >> 16) & 16383, 0, "PREPARE=0");
+    assert_eq((SNDRV_PCM_IOCTL_START   >> 16) & 16383, 0, "START=0");
+    assert_eq((SNDRV_PCM_IOCTL_DROP    >> 16) & 16383, 0, "DROP=0");
+    assert_eq((SNDRV_PCM_IOCTL_DRAIN   >> 16) & 16383, 0, "DRAIN=0");
+    return 0;
+}
+
+# Pin the type byte too — must be 'A' (0x41) for all SNDRV_PCM_*.
+fn test_ioctl_type_is_A() {
+    assert_eq((SNDRV_PCM_IOCTL_HW_PARAMS     >> 8) & 255, 0x41, "HW_PARAMS");
+    assert_eq((SNDRV_PCM_IOCTL_HW_REFINE     >> 8) & 255, 0x41, "HW_REFINE");
+    assert_eq((SNDRV_PCM_IOCTL_PREPARE       >> 8) & 255, 0x41, "PREPARE");
+    assert_eq((SNDRV_PCM_IOCTL_START         >> 8) & 255, 0x41, "START");
+    assert_eq((SNDRV_PCM_IOCTL_WRITEI_FRAMES >> 8) & 255, 0x41, "WRITEI");
+    assert_eq((SNDRV_PCM_IOCTL_READI_FRAMES  >> 8) & 255, 0x41, "READI");
+    return 0;
+}
+
 fn test_hwp_mask_offsets() {
     assert_eq(_hwp_mask_off(0), 4,   "ACCESS at +4");
     assert_eq(_hwp_mask_off(1), 36,  "FORMAT at +36");
@@ -548,6 +582,8 @@ fn main() {
 
     test_group("hw_params");
     test_hwp_layout_constants();
+    test_ioctl_size_encoding_matches_struct_size();
+    test_ioctl_type_is_A();
     test_hwp_mask_offsets();
     test_hwp_interval_offsets();
     test_hwp_init_any_fills_correctly();

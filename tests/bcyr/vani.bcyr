@@ -1,0 +1,333 @@
+# tests/bcyr/vani.bcyr — CPU-only benchmark harness for vani
+# Mirrors the mabda bench shape. All benches are pure CPU — no
+# real device fd, no syscall latency in the hot path. The numbers
+# track the cost of vani's userspace primitives:
+#
+#   ring write/read   — pow-of-2 byte ring (the playback hot path)
+#   format math       — frame ↔ byte and ms ↔ frame conversions
+#   hwp manipulation  — 608-byte struct init / mask / interval ops
+#   negotiation       — mask query + format quality walk
+#
+# Usage: cyrius bench tests/bcyr/vani.bcyr
+#
+# History is appended to `bench-history.csv` in the repo root via
+# the `CSV:` prefixed lines this file emits. Schema:
+#   name,min_ns
+# Add new benches here and the CSV row falls out automatically.
+
+include "src/lib.cyr"
+include "lib/bench.cyr"
+
+# ================================================================
+# Batch tuning — sub-1us ops need batched timing per lib/bench.cyr
+# ================================================================
+var BATCH_SIZE = 10000;
+var ROUNDS     = 100;
+var BIG_BATCH  = 1000;
+var BIG_ROUNDS = 50;
+
+fn _csv_row(b) {
+    var name = load64(b);
+    syscall(1, 1, "CSV:", 4);
+    syscall(1, 1, name, strlen(name));
+    syscall(1, 1, ",", 1);
+    fmt_int(bench_min_ns(b));
+    syscall(1, 1, "\n", 1);
+    return 0;
+}
+
+# ================================================================
+# format math
+# ================================================================
+
+fn bench_bytes_per_frame() {
+    var b = bench_new("bytes_per_frame");
+    var f = vani_format_default();
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            vani_bytes_per_frame(f);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_frames_to_bytes() {
+    var b = bench_new("frames_to_bytes");
+    var f = vani_format_default();
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            vani_frames_to_bytes(f, 9600);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_ms_to_frames() {
+    var b = bench_new("ms_to_frames");
+    var f = vani_format_default();
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            vani_ms_to_frames(f, 200);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_alsa_for() {
+    var b = bench_new("alsa_for");
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            vani_alsa_for(16, 1);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+# ================================================================
+# ring buffer
+# ================================================================
+# Per-call cost includes the inner byte-copy loop, so use the
+# smaller batch. Source / dest buffers reused across iterations.
+
+fn bench_ring_write_64b() {
+    var b = bench_new("ring_write_64b");
+    var rb = vani_ring_new(4096);
+    var src = alloc(64);
+    var ri = 0;
+    while (ri < BIG_ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BIG_BATCH) {
+            vani_ring_reset(rb);
+            vani_ring_write(rb, src, 64);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BIG_BATCH);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_ring_read_64b() {
+    var b = bench_new("ring_read_64b");
+    var rb = vani_ring_new(4096);
+    var src = alloc(64);
+    var dst = alloc(64);
+    var ri = 0;
+    while (ri < BIG_ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BIG_BATCH) {
+            vani_ring_reset(rb);
+            vani_ring_write(rb, src, 64);
+            vani_ring_read(rb, dst, 64);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BIG_BATCH);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_ring_used() {
+    var b = bench_new("ring_used");
+    var rb = vani_ring_new(4096);
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            vani_ring_used(rb);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+# ================================================================
+# hwp struct manipulation
+# ================================================================
+# These are heavier — _hwp_init_any writes 608 bytes plus loops to
+# fill 24 u32s and 36 u32s. Use big batch size.
+
+fn bench_hwp_init_any() {
+    var b = bench_new("hwp_init_any");
+    var hwp = alloc(HWP_SIZE);
+    var ri = 0;
+    while (ri < BIG_ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BIG_BATCH) {
+            _hwp_init_any(hwp);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BIG_BATCH);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_hwp_mask_set_value() {
+    var b = bench_new("hwp_mask_set_value");
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT,
+                                SND_PCM_FORMAT_S16_LE);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_hwp_interval_set_exact() {
+    var b = bench_new("hwp_interval_set_exact");
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            _hwp_interval_set_exact(hwp, 3, 48000);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+fn bench_hwp_mask_has_bit() {
+    var b = bench_new("hwp_mask_has_bit");
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            _hwp_mask_has_bit(hwp, 1, SND_PCM_FORMAT_S16_LE);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+# ================================================================
+# negotiation
+# ================================================================
+
+fn bench_negotiate_format_pick() {
+    var b = bench_new("negotiate_format_pick");
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    var ri = 0;
+    while (ri < ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BATCH_SIZE) {
+            _negotiate_format_pick(hwp, SND_PCM_FORMAT_S16_LE);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BATCH_SIZE);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+# ================================================================
+# Realistic workload: simulate one 200 ms playback worth of ring
+# writes (9600 frames × 4 bytes/frame = 38400 bytes).
+# ================================================================
+
+fn bench_ring_200ms_playback() {
+    var b = bench_new("ring_200ms_playback");
+    var rb = vani_ring_new(65536);  # 64 KiB pow-of-2
+    var src = alloc(38400);
+    var ri = 0;
+    while (ri < BIG_ROUNDS) {
+        bench_batch_start(b);
+        var bi = 0;
+        while (bi < BIG_BATCH) {
+            vani_ring_reset(rb);
+            vani_ring_write(rb, src, 38400);
+            bi = bi + 1;
+        }
+        bench_batch_stop(b, BIG_BATCH);
+        ri = ri + 1;
+    }
+    bench_report(b); _csv_row(b);
+    return 0;
+}
+
+# ================================================================
+# Runner
+# ================================================================
+
+fn main() {
+    alloc_init();
+    bench_bytes_per_frame();
+    bench_frames_to_bytes();
+    bench_ms_to_frames();
+    bench_alsa_for();
+    bench_ring_used();
+    bench_ring_write_64b();
+    bench_ring_read_64b();
+    bench_hwp_init_any();
+    bench_hwp_mask_set_value();
+    bench_hwp_interval_set_exact();
+    bench_hwp_mask_has_bit();
+    bench_negotiate_format_pick();
+    bench_ring_200ms_playback();
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

@@ -1,0 +1,137 @@
+# programs/throughput.cyr — sustained playback rate measurement
+#
+# Plays 200 ms of SILENCE (all zeros) through the full vani stack
+# and reports:
+#   - wall-clock time spent in vani_play
+#   - effective frames-per-second
+#   - xrun count after the run (should be 0 for steady-state)
+#
+# **Silent.** Writes only zero samples — no audible output. Safe
+# to run in any environment with a real audio card.
+#
+# Real-HW measurement covers v0.2.0 #9 (throughput portion).
+# Latency-from-write-to-audible needs external hardware (loopback
+# cable or microphone) and lands with v0.4.0 (latency + correctness).
+# Under-load underrun-rate also lands in v0.4.0 alongside
+# configurable period/buffer sizes.
+#
+# Defaults to card 1 device 0 — edit for your hardware.
+
+include "src/lib.cyr"
+
+enum ThroughputCfg {
+    THRU_CARD       = 1;
+    THRU_DEVICE     = 0;
+    THRU_RATE       = 48000;
+    THRU_DURATION_MS = 200;
+}
+
+# clock_gettime(CLOCK_MONOTONIC, &ts) — match lib/bench.cyr.
+fn _now_ns() {
+    var ts[16];
+    syscall(228, 1, &ts);
+    return load64(&ts) * 1000000000 + load64(&ts + 8);
+}
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+
+fn _puti(n) {
+    var buf[24];
+    var i = 23;
+    store8(&buf + i, 0);
+    if (n == 0) {
+        i = i - 1;
+        store8(&buf + i, 48);
+        syscall(1, 1, &buf + i, 23 - i);
+        return 0;
+    }
+    var neg = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    while (n > 0) {
+        i = i - 1;
+        store8(&buf + i, 48 + (n % 10));
+        n = n / 10;
+    }
+    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
+    syscall(1, 1, &buf + i, 23 - i);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani throughput — card ");
+    _puti(THRU_CARD);
+    _puts(" device ");
+    _puti(THRU_DEVICE);
+    _puts(" silence ");
+    _puti(THRU_DURATION_MS);
+    _puts(" ms\n");
+
+    var res = vani_open_playback(THRU_CARD, THRU_DEVICE);
+    if (is_ok(res) == 0) { _puts("open: FAIL\n"); return 1; }
+    var d = payload(res);
+
+    var cres = vani_configure(d, vani_format_default());
+    if (is_ok(cres) == 0) { _puts("configure: FAIL\n"); vani_close(d); return 1; }
+
+    var pres = vani_prepare(d);
+    if (is_ok(pres) == 0) { _puts("prepare: FAIL\n"); vani_close(d); return 1; }
+
+    var frames = (THRU_RATE * THRU_DURATION_MS) / 1000;
+    var bytes = frames * 4;  # stereo S16_LE
+    var buf = alloc(bytes);
+    memset(buf, 0, bytes);
+
+    var t0 = _now_ns();
+    var play_res = vani_play(d, buf, frames);
+    var t1 = _now_ns();
+
+    if (is_ok(play_res) == 0) {
+        _puts("play: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(play_res)));
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    var written = payload(play_res);
+    vani_drain(d);
+    var t2 = _now_ns();
+
+    _puts("  frames written: ");
+    _puti(written);
+    _puts(" of ");
+    _puti(frames);
+    _puts("\n");
+
+    _puts("  vani_play wall: ");
+    _puti(t1 - t0);
+    _puts(" ns\n");
+
+    _puts("  +drain wall:    ");
+    _puti(t2 - t0);
+    _puts(" ns (≈ ");
+    _puti((t2 - t0) / 1000000);
+    _puts(" ms)\n");
+
+    # Effective frames-per-second across vani_play. The drain is
+    # mostly the kernel waiting for the DMA to finish — not vani
+    # work — so we report play-only fps.
+    var play_us = (t1 - t0) / 1000;
+    if (play_us > 0) {
+        # fps = written * 1_000_000 / play_us
+        _puts("  vani_play fps:  ");
+        _puti(written * 1000000 / play_us);
+        _puts("\n");
+    }
+
+    _puts("  xrun_count:     ");
+    _puti(vani_xrun_count(d));
+    _puts("\n");
+
+    vani_close(d);
+    _puts("THROUGHPUT PASS\n");
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);
