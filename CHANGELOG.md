@@ -146,6 +146,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under-load deferred to v0.4.0 alongside configurable period
   / buffer sizes.
 
+### v0.3.0 progress (in-flight)
+
+- **#2 — `snd_ctl_elem_id` packing**: done.
+  `_ctl_elem_id_init(eid, iface, name)` builds the 64-byte ID
+  with bounded name length (43 chars + null) and the right iface
+  enum. Plus `_ctl_elem_id_get_name` for read-back.
+- **#3 — `snd_ctl_elem_value` packing**: done.
+  Layout enums for `snd_ctl_elem_id` (64 B), `snd_ctl_elem_info`
+  (272 B), `snd_ctl_elem_value` (1224 B), and
+  `snd_ctl_elem_list` (80 B = 74 raw + 6 alignment padding).
+  All four pinned by tests.
+- **#4 — `vani_mixer_set_volume`**: done. Resolves percent
+  0..100 to the device's native [min, max] range via
+  ELEM_INFO, then writes via ELEM_WRITE for every channel
+  (count comes from info).
+- **#5 — `vani_mixer_set_mute`**: done. BOOLEAN-typed elements,
+  human-direction muted (1 = silenced) translates to ALSA's
+  switch convention (0 = muted, 1 = on flow).
+- **#6 — `vani_mixer_list_elements`**: done. Two-pass
+  ELEM_LIST: first call returns count, second fills the
+  `snd_ctl_elem_id` array. Returns a 24-byte list-handle struct
+  with `count`, `pids`, `capacity`. Helpers
+  `vani_mixer_list_count`, `vani_mixer_list_id_at`,
+  `vani_mixer_list_name`.
+- **#7 — `vani_mixer_get_volume` / `vani_mixer_get_mute`**:
+  done. Mirror of the setters; returns Result<percent>
+  (or Result<0|1> for mute).
+- `programs/mixer_test.cyr` — read-only enumeration probe.
+  Lists every element, queries volume + mute for every INT /
+  BOOL control, prints type + range + current value. Real-HW
+  PASS on card 1: 38 elements enumerated cleanly (Front /
+  Surround / Center / LFE / Headphone / Master / Capture /
+  Mic Boost / etc.); jack-detect and channel-map controls
+  surface as "info FAIL" — they have non-INT/BOOL types and
+  fall outside v0.3.0's scope (lands later when needed).
+- Test suite gains a `mixer` group: 10 test fns / 47
+  assertions covering struct sizes, field offsets, ioctl
+  size+type encoding, iface + elem type enums, name init +
+  truncation. Total 162 → 209 assertions.
+
+### v0.4.0 progress (in-flight)
+
+- **#5 — typed `VaniState` enum**: done. `VaniState` mirrors
+  `AlsaPcmState` 1:1 (OPEN, SETUP, PREPARED, RUNNING, XRUN,
+  DRAINING, PAUSED, SUSPENDED) plus a `VANI_STATE_UNKNOWN`
+  sentinel for kernel-returned negatives or out-of-range values.
+  Helpers `vani_state_name`, `vani_state_from_raw`,
+  `vani_state_typed`. `programs/probe.cyr` and
+  `programs/latency_test.cyr` use the typed form.
+- **#3 — `SNDRV_PCM_IOCTL_SW_PARAMS` (136 bytes)**: done.
+  `AlsaSwParamsLayout` enum pins all 13 field offsets.
+  `audio_set_sw_params(dev, start_threshold, stop_threshold,
+  avail_min)` packs the struct with sane defaults (period_step=1,
+  xfer_align=1, silence=0, boundary=AUDIO_FRAMES_MAX). Higher
+  level `vani_set_sw_params` available on the device handle.
+- **#2 — configurable period / buffer**: done.
+  `audio_set_params_full(..., period_frames, buffer_frames)`
+  accepts non-zero values to constrain via
+  `SNDRV_PCM_HW_PARAM_PERIOD_SIZE` / `BUFFER_SIZE`; passing 0
+  leaves them "any". `audio_set_params` is now a thin wrapper.
+  `vani_configure_buffered` exposed at the device layer.
+  `_vani_round_period` rounds up to multiples of 16 to dodge
+  HDA / USB grain quirks.
+- **#4 — suspend / resume**: done. `SNDRV_PCM_IOCTL_RESUME =
+  0x00004147` added. `audio_resume(dev)` issues the ioctl;
+  returns -ENOSYS on kernels that don't implement it for the
+  driver. `vani_resume` falls back to `audio_prepare` in that
+  case. `vani_play` / `vani_record` recovery paths now handle
+  `SND_PCM_STATE_SUSPENDED` (try resume, retry the I/O once).
+- **#6 — low-latency preset**: done.
+  `vani_configure_low_latency(d, fmt)` — 10 ms × 4 = 40 ms
+  buffer, start_threshold=1 (start ASAP), stop_threshold=
+  buffer, avail_min=period. Sub-10 ms is rejected by HDA Generic
+  (kernel-side BDL alignment) — pro-audio consumers needing
+  ultra-low latency on dedicated USB DACs should call
+  `vani_configure_buffered` directly with their interface's
+  values. Real-HW PASS on `pcmC1D0p`: 9600/9600 frames, 0 xruns.
+- **#7 — casual preset**: done.
+  `vani_configure_casual(d, fmt)` — 16 ms × 4 = 64 ms,
+  start_threshold = 2 periods (kernel head start),
+  stop_threshold = buffer, avail_min = period. Real-HW PASS:
+  9600/9600 frames, 0 xruns.
+- `programs/latency_test.cyr` — runs both presets back-to-back,
+  prints state transitions, write/drain wall time, xrun count.
+  Real-HW PASS for both presets.
+- Test suite gains a `v0.4.0 state + sw_params` group: 7 test
+  fns / 40 assertions covering VaniState mapping, ALSA enum
+  equality, raw-int classification, SW_PARAMS struct layout,
+  and the RESUME / SW_PARAMS ioctl encodings. Total
+  209 → 249 assertions.
+
+### Fixed (in-flight, v0.3.0)
+
+- **POST-AUDIT-2 (HIGH)** — `SNDRV_CTL_IOCTL_ELEM_LIST` had
+  `size=280` baked in, but `sizeof(struct snd_ctl_elem_list)`
+  is 80 on x86_64 (74 raw bytes + 6 padding for the embedded
+  pointer's 8-byte alignment). Same shape as POST-AUDIT-1
+  (the WRITEI/READI bug): kernel ioctl dispatcher matches
+  the full command number, falls through to `-ENOTTY` when
+  the size bits are wrong. Surfaced when `vani_mixer_list_elements`
+  was first exercised on real hardware. Fixed:
+  `0xC1185510 → 0xC0505510`. Pinned by
+  `test_ctl_ioctl_size_encoding` against all 5 ctl ioctls.
+
 ### Fixed (post-audit, v0.2.0)
 
 - **POST-AUDIT-1 (HIGH)** — `SNDRV_PCM_IOCTL_WRITEI_FRAMES` and

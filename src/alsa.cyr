@@ -83,9 +83,12 @@ enum AlsaIoctl {
     SNDRV_PCM_IOCTL_HW_PARAMS     = 0xC2604111;
     SNDRV_PCM_IOCTL_SW_PARAMS     = 0xC0884113;
     SNDRV_PCM_IOCTL_PREPARE       = 0x00004140;
+    SNDRV_PCM_IOCTL_RESET         = 0x00004141;
     SNDRV_PCM_IOCTL_START         = 0x00004142;
     SNDRV_PCM_IOCTL_DROP          = 0x00004143;
     SNDRV_PCM_IOCTL_DRAIN         = 0x00004144;
+    SNDRV_PCM_IOCTL_PAUSE         = 0x00404145;
+    SNDRV_PCM_IOCTL_RESUME        = 0x00004147;
     SNDRV_PCM_IOCTL_WRITEI_FRAMES = 0x40184150;
     SNDRV_PCM_IOCTL_READI_FRAMES  = 0x80184151;
     SNDRV_PCM_IOCTL_STATUS        = 0x80984120;
@@ -278,6 +281,146 @@ fn _alsa_bits_for_format(fmt) {
 }
 
 # ================================================================
+# Control device structs (mixer; v0.3.0)
+# ================================================================
+# snd_ctl_elem_id (64 B):
+#   +0  numid     u32  (0 = identify by iface+name+index)
+#   +4  iface     u32  (SNDRV_CTL_ELEM_IFACE_*)
+#   +8  device    u32
+#   +12 subdevice u32
+#   +16 name      char[44]
+#   +60 index     u32
+#
+# snd_ctl_elem_info (272 B): id then type/access/count/owner then
+# a 128-byte value union (integer{min,max,step} at the front)
+# then dimen[4] then 56 reserved bytes.
+#
+# snd_ctl_elem_value (1224 B): id, indirect bitfield + padding,
+# then a 1024-byte value union (integer.value[128] at the front),
+# then 128 reserved bytes.
+#
+# snd_ctl_elem_list (280 B): offset/space/used/count + pids ptr +
+# 256 reserved.
+
+enum AlsaCtlIface {
+    SNDRV_CTL_ELEM_IFACE_CARD      = 0;
+    SNDRV_CTL_ELEM_IFACE_HWDEP     = 1;
+    SNDRV_CTL_ELEM_IFACE_MIXER     = 2;
+    SNDRV_CTL_ELEM_IFACE_PCM       = 3;
+    SNDRV_CTL_ELEM_IFACE_RAWMIDI   = 4;
+    SNDRV_CTL_ELEM_IFACE_TIMER     = 5;
+    SNDRV_CTL_ELEM_IFACE_SEQUENCER = 6;
+}
+
+enum AlsaCtlElemType {
+    SNDRV_CTL_ELEM_TYPE_NONE       = 0;
+    SNDRV_CTL_ELEM_TYPE_BOOLEAN    = 1;
+    SNDRV_CTL_ELEM_TYPE_INTEGER    = 2;
+    SNDRV_CTL_ELEM_TYPE_ENUMERATED = 3;
+    SNDRV_CTL_ELEM_TYPE_BYTES      = 4;
+    SNDRV_CTL_ELEM_TYPE_IEC958     = 5;
+    SNDRV_CTL_ELEM_TYPE_INTEGER64  = 6;
+}
+
+enum AlsaCtlElemIdLayout {
+    CTL_ELEM_ID_SIZE      = 64;
+    CTL_ELEM_ID_NUMID     = 0;
+    CTL_ELEM_ID_IFACE     = 4;
+    CTL_ELEM_ID_DEVICE    = 8;
+    CTL_ELEM_ID_SUBDEVICE = 12;
+    CTL_ELEM_ID_NAME_OFF  = 16;
+    CTL_ELEM_ID_NAME_LEN  = 44;
+    CTL_ELEM_ID_INDEX     = 60;
+}
+
+enum AlsaCtlElemInfoLayout {
+    CTL_ELEM_INFO_SIZE         = 272;
+    CTL_ELEM_INFO_TYPE         = 64;
+    CTL_ELEM_INFO_ACCESS       = 68;
+    CTL_ELEM_INFO_COUNT        = 72;
+    CTL_ELEM_INFO_OWNER        = 76;
+    CTL_ELEM_INFO_INTEGER_MIN  = 80;
+    CTL_ELEM_INFO_INTEGER_MAX  = 88;
+    CTL_ELEM_INFO_INTEGER_STEP = 96;
+}
+
+enum AlsaCtlElemValueLayout {
+    CTL_ELEM_VALUE_SIZE       = 1224;
+    CTL_ELEM_VALUE_INDIRECT   = 64;
+    CTL_ELEM_VALUE_INT_BASE   = 72;  # integer.value[0]
+}
+
+enum AlsaCtlElemListLayout {
+    CTL_ELEM_LIST_SIZE   = 80;  # 74 bytes raw + 6 padding (ptr alignment)
+    CTL_ELEM_LIST_OFFSET = 0;
+    CTL_ELEM_LIST_SPACE  = 4;
+    CTL_ELEM_LIST_USED   = 8;
+    CTL_ELEM_LIST_COUNT  = 12;
+    CTL_ELEM_LIST_PIDS   = 16;
+}
+
+# ================================================================
+# SW_PARAMS struct (v0.4.0 #3)
+# ================================================================
+# `struct snd_pcm_sw_params` is 136 bytes on x86_64. Field layout
+# verified 2026-04-30 against include/uapi/sound/asound.h:
+#   +0   tstamp_mode        i32
+#   +4   period_step        u32
+#   +8   sleep_min          u32
+#   (+12 4-byte padding for snd_pcm_uframes_t 8-byte alignment)
+#   +16  avail_min          u64  — kernel wakes us when this many frames are free
+#   +24  xfer_align         u64  — write/read alignment (1 = byte-granular)
+#   +32  start_threshold    u64  — auto-start when this many frames buffered
+#   +40  stop_threshold     u64  — XRUN if buffer drains below boundary - this
+#   +48  silence_threshold  u64  — fill silence when avail dips this low (0 disabled)
+#   +56  silence_size       u64
+#   +64  boundary           u64  — wraparound point for ring-position math
+#   +72  proto              u32
+#   +76  tstamp_type        u32
+#   +80  reserved[56]
+# = 136 bytes total
+
+enum AlsaSwParamsLayout {
+    SWP_SIZE              = 136;
+    SWP_TSTAMP_MODE       = 0;
+    SWP_PERIOD_STEP       = 4;
+    SWP_SLEEP_MIN         = 8;
+    SWP_AVAIL_MIN         = 16;
+    SWP_XFER_ALIGN        = 24;
+    SWP_START_THRESHOLD   = 32;
+    SWP_STOP_THRESHOLD    = 40;
+    SWP_SILENCE_THRESHOLD = 48;
+    SWP_SILENCE_SIZE      = 56;
+    SWP_BOUNDARY          = 64;
+    SWP_PROTO             = 72;
+    SWP_TSTAMP_TYPE       = 76;
+}
+
+# Initialize an snd_ctl_elem_id (eid must be 64 bytes).
+# `name` is a null-terminated cstr. We copy up to 43 bytes and
+# null-terminate at +59 to satisfy the kernel's strict length
+# check on the 44-byte name field.
+fn _ctl_elem_id_init(eid, iface, name) {
+    memset(eid, 0, CTL_ELEM_ID_SIZE);
+    store32(eid + CTL_ELEM_ID_IFACE, iface);
+    var nlen = strlen(name);
+    if (nlen > CTL_ELEM_ID_NAME_LEN - 1) {
+        nlen = CTL_ELEM_ID_NAME_LEN - 1;
+    }
+    memcpy(eid + CTL_ELEM_ID_NAME_OFF, name, nlen);
+    return 0;
+}
+
+# Read the name field out of an snd_ctl_elem_id buffer at offset
+# `id_off`. Caller's `out_buf` must be at least 45 bytes (44 + null).
+fn _ctl_elem_id_get_name(buf_with_id, id_off, out_buf) {
+    memcpy(out_buf, buf_with_id + id_off + CTL_ELEM_ID_NAME_OFF,
+           CTL_ELEM_ID_NAME_LEN);
+    store8(out_buf + CTL_ELEM_ID_NAME_LEN, 0);
+    return out_buf;
+}
+
+# ================================================================
 # HW_PARAMS struct readers — for HW_REFINE result inspection
 # ================================================================
 # After SNDRV_PCM_IOCTL_HW_REFINE the kernel narrows the masks and
@@ -378,8 +521,13 @@ fn audio_bit_depth(dev) { return load64(dev + 24); }
 # low-latency callers.
 #
 # Returns 0 on success, negative on failure (errno-shaped).
+#
+# `period_frames=0` and/or `buffer_frames=0` leaves those params
+# "any" — the kernel picks defaults for the device. Pass non-zero
+# to constrain explicitly (used by latency presets in device.cyr).
 
-fn audio_set_params(dev, rate, channels, bit_depth) {
+fn audio_set_params_full(dev, rate, channels, bit_depth,
+                         period_frames, buffer_frames) {
     if (dev == 0)       { return 0 - 1; }
     if (rate <= 0)      { return 0 - 1; }
     if (channels <= 0)  { return 0 - 1; }
@@ -410,6 +558,17 @@ fn audio_set_params(dev, rate, channels, bit_depth) {
         SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
         rate);
 
+    if (period_frames > 0) {
+        _hwp_interval_set_exact(&hwp,
+            SNDRV_PCM_HW_PARAM_PERIOD_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+            period_frames);
+    }
+    if (buffer_frames > 0) {
+        _hwp_interval_set_exact(&hwp,
+            SNDRV_PCM_HW_PARAM_BUFFER_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+            buffer_frames);
+    }
+
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
     if (r < 0) { return r; }
 
@@ -418,6 +577,52 @@ fn audio_set_params(dev, rate, channels, bit_depth) {
     store64(dev + 16, channels);
     store64(dev + 24, bit_depth);
     return 0;
+}
+
+# Backwards-compatible 4-arg form — kernel picks period / buffer.
+fn audio_set_params(dev, rate, channels, bit_depth) {
+    return audio_set_params_full(dev, rate, channels, bit_depth, 0, 0);
+}
+
+# ================================================================
+# SW_PARAMS configuration (v0.4.0 #3)
+# ================================================================
+# Sets start_threshold / stop_threshold / avail_min on a device
+# already through HW_PARAMS (i.e. in SETUP state). The other SW
+# fields take sane defaults:
+#   period_step = 1, xfer_align = 1, silence threshold/size = 0,
+#   boundary = AUDIO_FRAMES_MAX (2^28 — plenty of wraparound headroom).
+# Call BEFORE prepare() — kernel rejects SW_PARAMS once running.
+
+fn audio_set_sw_params(dev, start_threshold, stop_threshold, avail_min) {
+    if (dev == 0)               { return 0 - 1; }
+    if (start_threshold < 0)    { return 0 - 1; }
+    if (stop_threshold < 0)     { return 0 - 1; }
+    if (avail_min < 0)          { return 0 - 1; }
+    var swp[136];
+    memset(&swp, 0, SWP_SIZE);
+    store32(&swp + SWP_PERIOD_STEP, 1);
+    store64(&swp + SWP_AVAIL_MIN,         avail_min);
+    store64(&swp + SWP_XFER_ALIGN,        1);
+    store64(&swp + SWP_START_THRESHOLD,   start_threshold);
+    store64(&swp + SWP_STOP_THRESHOLD,    stop_threshold);
+    store64(&swp + SWP_SILENCE_THRESHOLD, 0);
+    store64(&swp + SWP_SILENCE_SIZE,      0);
+    store64(&swp + SWP_BOUNDARY,          AUDIO_FRAMES_MAX);
+    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_SW_PARAMS, &swp);
+}
+
+# ================================================================
+# Suspend / resume (v0.4.0 #4)
+# ================================================================
+# When the system suspends, the PCM goes to SND_PCM_STATE_SUSPENDED
+# and stays there until resume. SNDRV_PCM_IOCTL_RESUME (no payload)
+# transitions back; older kernels don't implement it and return
+# -ENOSYS — caller should fall back to prepare in that case.
+
+fn audio_resume(dev) {
+    if (dev == 0) { return 0 - 1; }
+    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_RESUME, 0);
 }
 
 # ================================================================

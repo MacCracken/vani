@@ -20,6 +20,46 @@ enum VaniDirection {
     VANI_CAPTURE  = 1;
 }
 
+# Typed PCM state — mirrors AlsaPcmState 1:1 with vani_-prefixed
+# names. Use `vani_state_typed(d)` for the enum form;
+# `vani_state(d)` still returns the raw int for callers that
+# already speak the SND_PCM_STATE_* constants.
+enum VaniState {
+    VANI_STATE_OPEN      = 0;
+    VANI_STATE_SETUP     = 1;
+    VANI_STATE_PREPARED  = 2;
+    VANI_STATE_RUNNING   = 3;
+    VANI_STATE_XRUN      = 4;
+    VANI_STATE_DRAINING  = 5;
+    VANI_STATE_PAUSED    = 6;
+    VANI_STATE_SUSPENDED = 7;
+    VANI_STATE_UNKNOWN   = 99;
+}
+
+fn vani_state_name(s) {
+    if (s == VANI_STATE_OPEN)      { return "OPEN"; }
+    if (s == VANI_STATE_SETUP)     { return "SETUP"; }
+    if (s == VANI_STATE_PREPARED)  { return "PREPARED"; }
+    if (s == VANI_STATE_RUNNING)   { return "RUNNING"; }
+    if (s == VANI_STATE_XRUN)      { return "XRUN"; }
+    if (s == VANI_STATE_DRAINING)  { return "DRAINING"; }
+    if (s == VANI_STATE_PAUSED)    { return "PAUSED"; }
+    if (s == VANI_STATE_SUSPENDED) { return "SUSPENDED"; }
+    return "UNKNOWN";
+}
+
+# Map a raw audio_get_state result (kernel int, possibly -1) into
+# the typed enum. Anything outside [0, 7] becomes VANI_STATE_UNKNOWN.
+fn vani_state_from_raw(raw) {
+    if (raw < 0) { return VANI_STATE_UNKNOWN; }
+    if (raw > 7) { return VANI_STATE_UNKNOWN; }
+    return raw;
+}
+
+fn vani_state_typed(d) {
+    return vani_state_from_raw(audio_get_state(vani_audio_handle(d)));
+}
+
 # ================================================================
 # Open / close
 # ================================================================
@@ -92,6 +132,103 @@ fn vani_configure(d, fmt) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
     }
     store64(d + 24, fmt);
+    return vani_ok(d);
+}
+
+# Configure with explicit period and buffer sizes (in frames).
+# `period_frames=0` / `buffer_frames=0` leaves those "any". Used
+# by the latency presets below; consumers can also call directly
+# for fine-grained control.
+fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var h = vani_audio_handle(d);
+    var r = audio_set_params_full(h,
+        vani_format_rate(fmt),
+        vani_format_channels(fmt),
+        vani_format_bit_depth(fmt),
+        period_frames, buffer_frames);
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_HW_PARAMS);
+    }
+    store64(d + 24, fmt);
+    return vani_ok(d);
+}
+
+fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min) {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    var r = audio_set_sw_params(vani_audio_handle(d),
+        start_threshold, stop_threshold, avail_min);
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_SW_PARAMS);
+    }
+    return vani_ok(d);
+}
+
+# ================================================================
+# Latency presets (v0.4.0 #6 + #7)
+# ================================================================
+# Two ready-to-use configurations covering the common ends of the
+# trade-off curve. Both run HW_PARAMS then SW_PARAMS in one shot;
+# caller still needs to vani_prepare(d) afterwards.
+#
+# Low-latency: 5 ms period × 4 = 20 ms total buffer. Pro audio,
+# real-time monitoring. start_threshold=1 (start ASAP).
+#
+# Casual: 16 ms period × 4 = 64 ms total. Music playback, video.
+# start_threshold = 2 periods worth (gives kernel a head start).
+
+# Round a frame count up to the next multiple of 16. HDA controllers
+# typically require period_size to be a multiple of a hardware grain
+# (often 32 or 64); 16 is the conservative minimum. Reduces "kernel
+# rejected our HW_PARAMS" surprises across HDA / USB / HDMI codecs.
+fn _vani_round_period(frames) {
+    if (frames < 16) { return 16; }
+    var rem = frames & 15;  # frames % 16
+    if (rem == 0) { return frames; }
+    return frames + (16 - rem);
+}
+
+fn vani_configure_low_latency(d, fmt) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var rate = vani_format_rate(fmt);
+    # 10 ms period × 4 = 40 ms total. Sub-10ms periods are
+    # rejected by HDA Generic (kernel likely needs a larger BDL
+    # alignment than the HW_REFINE bounds suggest). Dedicated
+    # USB-audio interfaces can go lower; consumers needing that
+    # should call vani_configure_buffered directly with their
+    # interface-specific values.
+    var period_frames = _vani_round_period((rate * 10) / 1000);
+    var buffer_frames = period_frames * 4;
+    var cres = vani_configure_buffered(d, fmt, period_frames, buffer_frames);
+    if (is_ok(cres) == 0) { return cres; }
+    return vani_set_sw_params(d, 1, buffer_frames, period_frames);
+}
+
+fn vani_configure_casual(d, fmt) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var rate = vani_format_rate(fmt);
+    var period_frames = _vani_round_period((rate * 16) / 1000);
+    var buffer_frames = period_frames * 4;
+    var cres = vani_configure_buffered(d, fmt, period_frames, buffer_frames);
+    if (is_ok(cres) == 0) { return cres; }
+    return vani_set_sw_params(d,
+        period_frames * 2,   # start_threshold
+        buffer_frames,        # stop_threshold
+        period_frames);       # avail_min
+}
+
+# Suspend recovery — try resume, fall back to prepare on -ENOSYS.
+fn vani_resume(d) {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    var h = vani_audio_handle(d);
+    var r = audio_resume(h);
+    if (r >= 0) { return vani_ok(d); }
+    # -ENOSYS (-38) → kernel doesn't implement RESUME for this driver.
+    var pr = audio_prepare(h);
+    if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
     return vani_ok(d);
 }
 

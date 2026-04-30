@@ -28,6 +28,13 @@ fn vani_record(d, buf, frames) {
         return vani_err_result(VANI_ERR_OVERRUN);
     }
     if (st == SND_PCM_STATE_SUSPENDED) {
+        var rr = audio_resume(h);
+        if (rr < 0) {
+            var pr = audio_prepare(h);
+            if (pr < 0) { return vani_err_result(VANI_ERR_SUSPENDED); }
+        }
+        got = audio_read(h, buf, frames);
+        if (got >= 0) { return vani_ok(got); }
         return vani_err_result(VANI_ERR_SUSPENDED);
     }
     return vani_err_result(VANI_ERR_READ);

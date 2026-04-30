@@ -91,16 +91,16 @@ struct packing.
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | P(-1) sweep before opening v0.3.0 work | Not started |
-| 2 | `snd_ctl_elem_id` (16 B iface + device + subdevice + name + index) packing | Not started |
-| 3 | `snd_ctl_elem_value` (variant union, 1024 B) packing | Not started |
-| 4 | `vani_mixer_set_volume` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Not started |
-| 5 | `vani_mixer_set_mute` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Not started |
-| 6 | `vani_mixer_list_elements` — `SNDRV_CTL_IOCTL_ELEM_LIST` enumeration | Not started |
-| 7 | `vani_mixer_get_volume` / `vani_mixer_get_mute` (read path) | Not started |
-| 8 | `vani_open_yukti(desc, direction)` — typed yukti audio descriptor adapter | Not started |
-| 9 | Multi-device routing helpers (onboard / USB / HDMI selection) | Not started |
-| 10 | Tag `0.3.0` | Not started |
+| 1 | P(-1) sweep before opening v0.3.0 work | Rolled into 2026-04-30 sweep + post-audit findings |
+| 2 | `snd_ctl_elem_id` (64 B) packing | Done — `src/alsa.cyr` |
+| 3 | `snd_ctl_elem_value` (1224 B) packing | Done — `src/alsa.cyr` |
+| 4 | `vani_mixer_set_volume` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Done — `src/mixer.cyr` |
+| 5 | `vani_mixer_set_mute` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Done — `src/mixer.cyr` |
+| 6 | `vani_mixer_list_elements` — `SNDRV_CTL_IOCTL_ELEM_LIST` enumeration | Done — 38 elements enumerated on real HW |
+| 7 | `vani_mixer_get_volume` / `vani_mixer_get_mute` (read path) | Done — `src/mixer.cyr` |
+| 8 | `vani_open_yukti(desc, direction)` — typed yukti audio descriptor adapter | **Blocked upstream** — yukti 2.1.1 is storage-only (UDEV / MBR / GPT); no audio device discovery. Needs yukti to grow `yukti_audio_*` surface first. |
+| 9 | Multi-device routing helpers (onboard / USB / HDMI selection) | **Blocked** — depends on #8 |
+| 10 | Tag `0.3.0` | Ready for tag — items 8/9 are upstream work, can ship 0.3.0 with mixer-only and pick them up in 0.3.1 once yukti lands audio. |
 
 ## v0.4.0 — Latency + correctness
 
@@ -110,15 +110,15 @@ state-machine pieces (suspend/resume, typed state enum).
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | P(-1) sweep before opening v0.4.0 work | Not started |
-| 2 | Configurable buffer size on configure (`period_size`, `periods`) | Not started |
-| 3 | `SNDRV_PCM_IOCTL_SW_PARAMS` (start_threshold, stop_threshold, avail_min) | Not started |
-| 4 | Suspend / resume support (handle `SUSPENDED` → `audio_resume` retry) | Not started |
-| 5 | `audio_get_state` → typed `VaniState` enum (replace raw int returns) | Not started |
-| 6 | Low-latency mode preset (5 ms ring, small period, tight thresholds) | Not started |
-| 7 | Casual-playback preset (64 ms ring, large period) | Not started |
-| 8 | XRUN-rate benchmark on real hardware under load | Not started |
-| 9 | Tag `0.4.0` | Not started |
+| 1 | P(-1) sweep before opening v0.4.0 work | Rolled into 2026-04-30 sweep + post-audit findings |
+| 2 | Configurable buffer size on configure (`period_size`, `periods`) | Done — `audio_set_params_full` + `vani_configure_buffered` |
+| 3 | `SNDRV_PCM_IOCTL_SW_PARAMS` (start_threshold, stop_threshold, avail_min) | Done — `audio_set_sw_params` + `vani_set_sw_params` |
+| 4 | Suspend / resume support (handle `SUSPENDED` → `audio_resume` retry) | Done — `audio_resume` + `vani_resume`; playback/capture recovery paths handle SUSPENDED |
+| 5 | `audio_get_state` → typed `VaniState` enum (replace raw int returns) | Done — `VaniState` enum + `vani_state_typed` + `vani_state_name` |
+| 6 | Low-latency mode preset (period × 4, tight thresholds) | Done — `vani_configure_low_latency` (10 ms × 4 = 40 ms; HDA Generic won't accept sub-10ms periods, dedicated USB DACs can call `vani_configure_buffered` directly) |
+| 7 | Casual-playback preset (16 ms × 4 = 64 ms ring) | Done — `vani_configure_casual` |
+| 8 | XRUN-rate benchmark on real hardware under load | Not started — needs sustained-stress harness; punt to v0.4.x patch |
+| 9 | Tag `0.4.0` | Pending — items 2-7 done, #8 deferred |
 
 ## Cyrius 5.8.0 fold-in (cross-cut)
 

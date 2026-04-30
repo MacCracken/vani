@@ -24,7 +24,7 @@ fn vani_play(d, buf, frames) {
     var h = vani_audio_handle(d);
     var written = audio_write(h, buf, frames);
     if (written >= 0) { return vani_ok(written); }
-    # Negative return: try to recover from XRUN once.
+    # Negative return: try to recover from XRUN or SUSPENDED once.
     var st = audio_get_state(h);
     if (st == SND_PCM_STATE_XRUN) {
         vani_xrun_inc(d);
@@ -35,6 +35,14 @@ fn vani_play(d, buf, frames) {
         return vani_err_result(VANI_ERR_UNDERRUN);
     }
     if (st == SND_PCM_STATE_SUSPENDED) {
+        # Try resume; fall back to prepare if kernel doesn't support it.
+        var rr = audio_resume(h);
+        if (rr < 0) {
+            var pr = audio_prepare(h);
+            if (pr < 0) { return vani_err_result(VANI_ERR_SUSPENDED); }
+        }
+        written = audio_write(h, buf, frames);
+        if (written >= 0) { return vani_ok(written); }
         return vani_err_result(VANI_ERR_SUSPENDED);
     }
     return vani_err_result(VANI_ERR_WRITE);

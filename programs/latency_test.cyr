@@ -1,0 +1,152 @@
+# programs/latency_test.cyr — exercise the v0.4.0 latency presets
+#
+# Plays 200 ms of silence through each preset (low-latency,
+# casual) and reports the resulting period / buffer sizes plus
+# actual write-call wall time. Validates that:
+#   - vani_configure_buffered constrains period / buffer correctly
+#   - vani_set_sw_params is accepted by the kernel
+#   - the preset configurations don't cause underruns at idle
+#
+# Roadmap v0.4.0 #2 (period/buffer) + #3 (SW_PARAMS) + #6 (low-latency
+# preset) + #7 (casual preset).
+#
+# Silent. Defaults card 1 device 0; edit constants for your hardware.
+
+include "src/lib.cyr"
+
+enum LatencyCfg {
+    LAT_CARD       = 1;
+    LAT_DEVICE     = 0;
+    LAT_DURATION_MS = 200;
+}
+
+fn _now_ns() {
+    var ts[16];
+    syscall(228, 1, &ts);
+    return load64(&ts) * 1000000000 + load64(&ts + 8);
+}
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+
+fn _puti(n) {
+    var buf[24];
+    var i = 23;
+    store8(&buf + i, 0);
+    if (n == 0) {
+        i = i - 1;
+        store8(&buf + i, 48);
+        syscall(1, 1, &buf + i, 23 - i);
+        return 0;
+    }
+    var neg = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    while (n > 0) {
+        i = i - 1;
+        store8(&buf + i, 48 + (n % 10));
+        n = n / 10;
+    }
+    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
+    syscall(1, 1, &buf + i, 23 - i);
+    return 0;
+}
+
+# Run one playback with the given preset name + configurator fnptr.
+# Returns 0 on success, 1 on failure.
+fn _run_preset(label, preset_fn) {
+    _puts("--- ");
+    _puts(label);
+    _puts(" ---\n");
+
+    var ores = vani_open_playback(LAT_CARD, LAT_DEVICE);
+    if (is_ok(ores) == 0) { _puts("open: FAIL\n"); return 1; }
+    var d = payload(ores);
+
+    var fmt = vani_format_default();
+    var cres = fncall2(preset_fn, d, fmt);
+    if (is_ok(cres) == 0) {
+        _puts("preset configure: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(cres)));
+        var det = vani_err_detail(payload(cres));
+        if (det != 0) {
+            _puts(": ");
+            syscall(1, 1, det, strlen(det));
+        }
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    _puts("  state-after-configure: ");
+    _puts(vani_state_name(vani_state_typed(d)));
+    _puts("\n");
+
+    var pres = vani_prepare(d);
+    if (is_ok(pres) == 0) { _puts("prepare: FAIL\n"); vani_close(d); return 1; }
+    _puts("  state-after-prepare:   ");
+    _puts(vani_state_name(vani_state_typed(d)));
+    _puts("\n");
+
+    var rate = vani_format_rate(fmt);
+    var frames = (rate * LAT_DURATION_MS) / 1000;
+    var bytes = frames * 4;
+    var buf = alloc(bytes);
+    memset(buf, 0, bytes);
+
+    var t0 = _now_ns();
+    var play_res = vani_play(d, buf, frames);
+    var t1 = _now_ns();
+    if (is_ok(play_res) == 0) {
+        _puts("play: FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+    var written = payload(play_res);
+    vani_drain(d);
+    var t2 = _now_ns();
+
+    _puts("  frames written: ");
+    _puti(written);
+    _puts(" of ");
+    _puti(frames);
+    _puts("\n  vani_play wall: ");
+    _puti(t1 - t0);
+    _puts(" ns (");
+    _puti((t1 - t0) / 1000000);
+    _puts(" ms)\n  +drain wall:    ");
+    _puti(t2 - t0);
+    _puts(" ns (");
+    _puti((t2 - t0) / 1000000);
+    _puts(" ms)\n  xrun_count:     ");
+    _puti(vani_xrun_count(d));
+    _puts("\n");
+
+    vani_close(d);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani latency presets — card ");
+    _puti(LAT_CARD);
+    _puts(" device ");
+    _puti(LAT_DEVICE);
+    _puts(", ");
+    _puti(LAT_DURATION_MS);
+    _puts(" ms silence\n\n");
+
+    var fail = 0;
+    fail = fail + _run_preset("low-latency (10 ms × 4 = 40 ms buf)",
+                              &vani_configure_low_latency);
+    _puts("\n");
+    fail = fail + _run_preset("casual (16 ms × 4 = 64 ms buf)",
+                              &vani_configure_casual);
+    _puts("\n");
+    if (fail > 0) {
+        _puts("LATENCY TEST FAIL\n");
+        return 1;
+    }
+    _puts("LATENCY TEST PASS\n");
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

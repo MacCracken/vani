@@ -91,9 +91,12 @@ enum AlsaIoctl {
     SNDRV_PCM_IOCTL_HW_PARAMS     = 0xC2604111;
     SNDRV_PCM_IOCTL_SW_PARAMS     = 0xC0884113;
     SNDRV_PCM_IOCTL_PREPARE       = 0x00004140;
+    SNDRV_PCM_IOCTL_RESET         = 0x00004141;
     SNDRV_PCM_IOCTL_START         = 0x00004142;
     SNDRV_PCM_IOCTL_DROP          = 0x00004143;
     SNDRV_PCM_IOCTL_DRAIN         = 0x00004144;
+    SNDRV_PCM_IOCTL_PAUSE         = 0x00404145;
+    SNDRV_PCM_IOCTL_RESUME        = 0x00004147;
     SNDRV_PCM_IOCTL_WRITEI_FRAMES = 0x40184150;
     SNDRV_PCM_IOCTL_READI_FRAMES  = 0x80184151;
     SNDRV_PCM_IOCTL_STATUS        = 0x80984120;
@@ -286,6 +289,146 @@ fn _alsa_bits_for_format(fmt) {
 }
 
 # ================================================================
+# Control device structs (mixer; v0.3.0)
+# ================================================================
+# snd_ctl_elem_id (64 B):
+#   +0  numid     u32  (0 = identify by iface+name+index)
+#   +4  iface     u32  (SNDRV_CTL_ELEM_IFACE_*)
+#   +8  device    u32
+#   +12 subdevice u32
+#   +16 name      char[44]
+#   +60 index     u32
+#
+# snd_ctl_elem_info (272 B): id then type/access/count/owner then
+# a 128-byte value union (integer{min,max,step} at the front)
+# then dimen[4] then 56 reserved bytes.
+#
+# snd_ctl_elem_value (1224 B): id, indirect bitfield + padding,
+# then a 1024-byte value union (integer.value[128] at the front),
+# then 128 reserved bytes.
+#
+# snd_ctl_elem_list (280 B): offset/space/used/count + pids ptr +
+# 256 reserved.
+
+enum AlsaCtlIface {
+    SNDRV_CTL_ELEM_IFACE_CARD      = 0;
+    SNDRV_CTL_ELEM_IFACE_HWDEP     = 1;
+    SNDRV_CTL_ELEM_IFACE_MIXER     = 2;
+    SNDRV_CTL_ELEM_IFACE_PCM       = 3;
+    SNDRV_CTL_ELEM_IFACE_RAWMIDI   = 4;
+    SNDRV_CTL_ELEM_IFACE_TIMER     = 5;
+    SNDRV_CTL_ELEM_IFACE_SEQUENCER = 6;
+}
+
+enum AlsaCtlElemType {
+    SNDRV_CTL_ELEM_TYPE_NONE       = 0;
+    SNDRV_CTL_ELEM_TYPE_BOOLEAN    = 1;
+    SNDRV_CTL_ELEM_TYPE_INTEGER    = 2;
+    SNDRV_CTL_ELEM_TYPE_ENUMERATED = 3;
+    SNDRV_CTL_ELEM_TYPE_BYTES      = 4;
+    SNDRV_CTL_ELEM_TYPE_IEC958     = 5;
+    SNDRV_CTL_ELEM_TYPE_INTEGER64  = 6;
+}
+
+enum AlsaCtlElemIdLayout {
+    CTL_ELEM_ID_SIZE      = 64;
+    CTL_ELEM_ID_NUMID     = 0;
+    CTL_ELEM_ID_IFACE     = 4;
+    CTL_ELEM_ID_DEVICE    = 8;
+    CTL_ELEM_ID_SUBDEVICE = 12;
+    CTL_ELEM_ID_NAME_OFF  = 16;
+    CTL_ELEM_ID_NAME_LEN  = 44;
+    CTL_ELEM_ID_INDEX     = 60;
+}
+
+enum AlsaCtlElemInfoLayout {
+    CTL_ELEM_INFO_SIZE         = 272;
+    CTL_ELEM_INFO_TYPE         = 64;
+    CTL_ELEM_INFO_ACCESS       = 68;
+    CTL_ELEM_INFO_COUNT        = 72;
+    CTL_ELEM_INFO_OWNER        = 76;
+    CTL_ELEM_INFO_INTEGER_MIN  = 80;
+    CTL_ELEM_INFO_INTEGER_MAX  = 88;
+    CTL_ELEM_INFO_INTEGER_STEP = 96;
+}
+
+enum AlsaCtlElemValueLayout {
+    CTL_ELEM_VALUE_SIZE       = 1224;
+    CTL_ELEM_VALUE_INDIRECT   = 64;
+    CTL_ELEM_VALUE_INT_BASE   = 72;  # integer.value[0]
+}
+
+enum AlsaCtlElemListLayout {
+    CTL_ELEM_LIST_SIZE   = 80;  # 74 bytes raw + 6 padding (ptr alignment)
+    CTL_ELEM_LIST_OFFSET = 0;
+    CTL_ELEM_LIST_SPACE  = 4;
+    CTL_ELEM_LIST_USED   = 8;
+    CTL_ELEM_LIST_COUNT  = 12;
+    CTL_ELEM_LIST_PIDS   = 16;
+}
+
+# ================================================================
+# SW_PARAMS struct (v0.4.0 #3)
+# ================================================================
+# `struct snd_pcm_sw_params` is 136 bytes on x86_64. Field layout
+# verified 2026-04-30 against include/uapi/sound/asound.h:
+#   +0   tstamp_mode        i32
+#   +4   period_step        u32
+#   +8   sleep_min          u32
+#   (+12 4-byte padding for snd_pcm_uframes_t 8-byte alignment)
+#   +16  avail_min          u64  — kernel wakes us when this many frames are free
+#   +24  xfer_align         u64  — write/read alignment (1 = byte-granular)
+#   +32  start_threshold    u64  — auto-start when this many frames buffered
+#   +40  stop_threshold     u64  — XRUN if buffer drains below boundary - this
+#   +48  silence_threshold  u64  — fill silence when avail dips this low (0 disabled)
+#   +56  silence_size       u64
+#   +64  boundary           u64  — wraparound point for ring-position math
+#   +72  proto              u32
+#   +76  tstamp_type        u32
+#   +80  reserved[56]
+# = 136 bytes total
+
+enum AlsaSwParamsLayout {
+    SWP_SIZE              = 136;
+    SWP_TSTAMP_MODE       = 0;
+    SWP_PERIOD_STEP       = 4;
+    SWP_SLEEP_MIN         = 8;
+    SWP_AVAIL_MIN         = 16;
+    SWP_XFER_ALIGN        = 24;
+    SWP_START_THRESHOLD   = 32;
+    SWP_STOP_THRESHOLD    = 40;
+    SWP_SILENCE_THRESHOLD = 48;
+    SWP_SILENCE_SIZE      = 56;
+    SWP_BOUNDARY          = 64;
+    SWP_PROTO             = 72;
+    SWP_TSTAMP_TYPE       = 76;
+}
+
+# Initialize an snd_ctl_elem_id (eid must be 64 bytes).
+# `name` is a null-terminated cstr. We copy up to 43 bytes and
+# null-terminate at +59 to satisfy the kernel's strict length
+# check on the 44-byte name field.
+fn _ctl_elem_id_init(eid, iface, name) {
+    memset(eid, 0, CTL_ELEM_ID_SIZE);
+    store32(eid + CTL_ELEM_ID_IFACE, iface);
+    var nlen = strlen(name);
+    if (nlen > CTL_ELEM_ID_NAME_LEN - 1) {
+        nlen = CTL_ELEM_ID_NAME_LEN - 1;
+    }
+    memcpy(eid + CTL_ELEM_ID_NAME_OFF, name, nlen);
+    return 0;
+}
+
+# Read the name field out of an snd_ctl_elem_id buffer at offset
+# `id_off`. Caller's `out_buf` must be at least 45 bytes (44 + null).
+fn _ctl_elem_id_get_name(buf_with_id, id_off, out_buf) {
+    memcpy(out_buf, buf_with_id + id_off + CTL_ELEM_ID_NAME_OFF,
+           CTL_ELEM_ID_NAME_LEN);
+    store8(out_buf + CTL_ELEM_ID_NAME_LEN, 0);
+    return out_buf;
+}
+
+# ================================================================
 # HW_PARAMS struct readers — for HW_REFINE result inspection
 # ================================================================
 # After SNDRV_PCM_IOCTL_HW_REFINE the kernel narrows the masks and
@@ -386,8 +529,13 @@ fn audio_bit_depth(dev) { return load64(dev + 24); }
 # low-latency callers.
 #
 # Returns 0 on success, negative on failure (errno-shaped).
+#
+# `period_frames=0` and/or `buffer_frames=0` leaves those params
+# "any" — the kernel picks defaults for the device. Pass non-zero
+# to constrain explicitly (used by latency presets in device.cyr).
 
-fn audio_set_params(dev, rate, channels, bit_depth) {
+fn audio_set_params_full(dev, rate, channels, bit_depth,
+                         period_frames, buffer_frames) {
     if (dev == 0)       { return 0 - 1; }
     if (rate <= 0)      { return 0 - 1; }
     if (channels <= 0)  { return 0 - 1; }
@@ -418,6 +566,17 @@ fn audio_set_params(dev, rate, channels, bit_depth) {
         SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
         rate);
 
+    if (period_frames > 0) {
+        _hwp_interval_set_exact(&hwp,
+            SNDRV_PCM_HW_PARAM_PERIOD_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+            period_frames);
+    }
+    if (buffer_frames > 0) {
+        _hwp_interval_set_exact(&hwp,
+            SNDRV_PCM_HW_PARAM_BUFFER_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+            buffer_frames);
+    }
+
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
     if (r < 0) { return r; }
 
@@ -426,6 +585,52 @@ fn audio_set_params(dev, rate, channels, bit_depth) {
     store64(dev + 16, channels);
     store64(dev + 24, bit_depth);
     return 0;
+}
+
+# Backwards-compatible 4-arg form — kernel picks period / buffer.
+fn audio_set_params(dev, rate, channels, bit_depth) {
+    return audio_set_params_full(dev, rate, channels, bit_depth, 0, 0);
+}
+
+# ================================================================
+# SW_PARAMS configuration (v0.4.0 #3)
+# ================================================================
+# Sets start_threshold / stop_threshold / avail_min on a device
+# already through HW_PARAMS (i.e. in SETUP state). The other SW
+# fields take sane defaults:
+#   period_step = 1, xfer_align = 1, silence threshold/size = 0,
+#   boundary = AUDIO_FRAMES_MAX (2^28 — plenty of wraparound headroom).
+# Call BEFORE prepare() — kernel rejects SW_PARAMS once running.
+
+fn audio_set_sw_params(dev, start_threshold, stop_threshold, avail_min) {
+    if (dev == 0)               { return 0 - 1; }
+    if (start_threshold < 0)    { return 0 - 1; }
+    if (stop_threshold < 0)     { return 0 - 1; }
+    if (avail_min < 0)          { return 0 - 1; }
+    var swp[136];
+    memset(&swp, 0, SWP_SIZE);
+    store32(&swp + SWP_PERIOD_STEP, 1);
+    store64(&swp + SWP_AVAIL_MIN,         avail_min);
+    store64(&swp + SWP_XFER_ALIGN,        1);
+    store64(&swp + SWP_START_THRESHOLD,   start_threshold);
+    store64(&swp + SWP_STOP_THRESHOLD,    stop_threshold);
+    store64(&swp + SWP_SILENCE_THRESHOLD, 0);
+    store64(&swp + SWP_SILENCE_SIZE,      0);
+    store64(&swp + SWP_BOUNDARY,          AUDIO_FRAMES_MAX);
+    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_SW_PARAMS, &swp);
+}
+
+# ================================================================
+# Suspend / resume (v0.4.0 #4)
+# ================================================================
+# When the system suspends, the PCM goes to SND_PCM_STATE_SUSPENDED
+# and stays there until resume. SNDRV_PCM_IOCTL_RESUME (no payload)
+# transitions back; older kernels don't implement it and return
+# -ENOSYS — caller should fall back to prepare in that case.
+
+fn audio_resume(dev) {
+    if (dev == 0) { return 0 - 1; }
+    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_RESUME, 0);
 }
 
 # ================================================================
@@ -1045,6 +1250,46 @@ enum VaniDirection {
     VANI_CAPTURE  = 1;
 }
 
+# Typed PCM state — mirrors AlsaPcmState 1:1 with vani_-prefixed
+# names. Use `vani_state_typed(d)` for the enum form;
+# `vani_state(d)` still returns the raw int for callers that
+# already speak the SND_PCM_STATE_* constants.
+enum VaniState {
+    VANI_STATE_OPEN      = 0;
+    VANI_STATE_SETUP     = 1;
+    VANI_STATE_PREPARED  = 2;
+    VANI_STATE_RUNNING   = 3;
+    VANI_STATE_XRUN      = 4;
+    VANI_STATE_DRAINING  = 5;
+    VANI_STATE_PAUSED    = 6;
+    VANI_STATE_SUSPENDED = 7;
+    VANI_STATE_UNKNOWN   = 99;
+}
+
+fn vani_state_name(s) {
+    if (s == VANI_STATE_OPEN)      { return "OPEN"; }
+    if (s == VANI_STATE_SETUP)     { return "SETUP"; }
+    if (s == VANI_STATE_PREPARED)  { return "PREPARED"; }
+    if (s == VANI_STATE_RUNNING)   { return "RUNNING"; }
+    if (s == VANI_STATE_XRUN)      { return "XRUN"; }
+    if (s == VANI_STATE_DRAINING)  { return "DRAINING"; }
+    if (s == VANI_STATE_PAUSED)    { return "PAUSED"; }
+    if (s == VANI_STATE_SUSPENDED) { return "SUSPENDED"; }
+    return "UNKNOWN";
+}
+
+# Map a raw audio_get_state result (kernel int, possibly -1) into
+# the typed enum. Anything outside [0, 7] becomes VANI_STATE_UNKNOWN.
+fn vani_state_from_raw(raw) {
+    if (raw < 0) { return VANI_STATE_UNKNOWN; }
+    if (raw > 7) { return VANI_STATE_UNKNOWN; }
+    return raw;
+}
+
+fn vani_state_typed(d) {
+    return vani_state_from_raw(audio_get_state(vani_audio_handle(d)));
+}
+
 # ================================================================
 # Open / close
 # ================================================================
@@ -1117,6 +1362,103 @@ fn vani_configure(d, fmt) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
     }
     store64(d + 24, fmt);
+    return vani_ok(d);
+}
+
+# Configure with explicit period and buffer sizes (in frames).
+# `period_frames=0` / `buffer_frames=0` leaves those "any". Used
+# by the latency presets below; consumers can also call directly
+# for fine-grained control.
+fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var h = vani_audio_handle(d);
+    var r = audio_set_params_full(h,
+        vani_format_rate(fmt),
+        vani_format_channels(fmt),
+        vani_format_bit_depth(fmt),
+        period_frames, buffer_frames);
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_HW_PARAMS);
+    }
+    store64(d + 24, fmt);
+    return vani_ok(d);
+}
+
+fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min) {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    var r = audio_set_sw_params(vani_audio_handle(d),
+        start_threshold, stop_threshold, avail_min);
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_SW_PARAMS);
+    }
+    return vani_ok(d);
+}
+
+# ================================================================
+# Latency presets (v0.4.0 #6 + #7)
+# ================================================================
+# Two ready-to-use configurations covering the common ends of the
+# trade-off curve. Both run HW_PARAMS then SW_PARAMS in one shot;
+# caller still needs to vani_prepare(d) afterwards.
+#
+# Low-latency: 5 ms period × 4 = 20 ms total buffer. Pro audio,
+# real-time monitoring. start_threshold=1 (start ASAP).
+#
+# Casual: 16 ms period × 4 = 64 ms total. Music playback, video.
+# start_threshold = 2 periods worth (gives kernel a head start).
+
+# Round a frame count up to the next multiple of 16. HDA controllers
+# typically require period_size to be a multiple of a hardware grain
+# (often 32 or 64); 16 is the conservative minimum. Reduces "kernel
+# rejected our HW_PARAMS" surprises across HDA / USB / HDMI codecs.
+fn _vani_round_period(frames) {
+    if (frames < 16) { return 16; }
+    var rem = frames & 15;  # frames % 16
+    if (rem == 0) { return frames; }
+    return frames + (16 - rem);
+}
+
+fn vani_configure_low_latency(d, fmt) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var rate = vani_format_rate(fmt);
+    # 10 ms period × 4 = 40 ms total. Sub-10ms periods are
+    # rejected by HDA Generic (kernel likely needs a larger BDL
+    # alignment than the HW_REFINE bounds suggest). Dedicated
+    # USB-audio interfaces can go lower; consumers needing that
+    # should call vani_configure_buffered directly with their
+    # interface-specific values.
+    var period_frames = _vani_round_period((rate * 10) / 1000);
+    var buffer_frames = period_frames * 4;
+    var cres = vani_configure_buffered(d, fmt, period_frames, buffer_frames);
+    if (is_ok(cres) == 0) { return cres; }
+    return vani_set_sw_params(d, 1, buffer_frames, period_frames);
+}
+
+fn vani_configure_casual(d, fmt) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var rate = vani_format_rate(fmt);
+    var period_frames = _vani_round_period((rate * 16) / 1000);
+    var buffer_frames = period_frames * 4;
+    var cres = vani_configure_buffered(d, fmt, period_frames, buffer_frames);
+    if (is_ok(cres) == 0) { return cres; }
+    return vani_set_sw_params(d,
+        period_frames * 2,   # start_threshold
+        buffer_frames,        # stop_threshold
+        period_frames);       # avail_min
+}
+
+# Suspend recovery — try resume, fall back to prepare on -ENOSYS.
+fn vani_resume(d) {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    var h = vani_audio_handle(d);
+    var r = audio_resume(h);
+    if (r >= 0) { return vani_ok(d); }
+    # -ENOSYS (-38) → kernel doesn't implement RESUME for this driver.
+    var pr = audio_prepare(h);
+    if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
     return vani_ok(d);
 }
 
@@ -1284,7 +1626,7 @@ fn vani_play(d, buf, frames) {
     var h = vani_audio_handle(d);
     var written = audio_write(h, buf, frames);
     if (written >= 0) { return vani_ok(written); }
-    # Negative return: try to recover from XRUN once.
+    # Negative return: try to recover from XRUN or SUSPENDED once.
     var st = audio_get_state(h);
     if (st == SND_PCM_STATE_XRUN) {
         vani_xrun_inc(d);
@@ -1295,6 +1637,14 @@ fn vani_play(d, buf, frames) {
         return vani_err_result(VANI_ERR_UNDERRUN);
     }
     if (st == SND_PCM_STATE_SUSPENDED) {
+        # Try resume; fall back to prepare if kernel doesn't support it.
+        var rr = audio_resume(h);
+        if (rr < 0) {
+            var pr = audio_prepare(h);
+            if (pr < 0) { return vani_err_result(VANI_ERR_SUSPENDED); }
+        }
+        written = audio_write(h, buf, frames);
+        if (written >= 0) { return vani_ok(written); }
         return vani_err_result(VANI_ERR_SUSPENDED);
     }
     return vani_err_result(VANI_ERR_WRITE);
@@ -1356,6 +1706,13 @@ fn vani_record(d, buf, frames) {
         return vani_err_result(VANI_ERR_OVERRUN);
     }
     if (st == SND_PCM_STATE_SUSPENDED) {
+        var rr = audio_resume(h);
+        if (rr < 0) {
+            var pr = audio_prepare(h);
+            if (pr < 0) { return vani_err_result(VANI_ERR_SUSPENDED); }
+        }
+        got = audio_read(h, buf, frames);
+        if (got >= 0) { return vani_ok(got); }
         return vani_err_result(VANI_ERR_SUSPENDED);
     }
     return vani_err_result(VANI_ERR_READ);
@@ -1412,9 +1769,18 @@ fn vani_record_to_ring(d, rb, frames) {
 # Control device ioctl numbers
 # ================================================================
 
+# Sizes encoded in the ioctl number (bits 16-29) match
+# `sizeof(struct …)` on x86_64. Verified 2026-04-30 against
+# include/uapi/sound/asound.h:
+#   snd_ctl_card_info     376 bytes  → 0x178 << 16
+#   snd_ctl_elem_list      80 bytes  → 0x050 << 16  (74 raw, padded to 80)
+#   snd_ctl_elem_info     272 bytes  → 0x110 << 16
+#   snd_ctl_elem_value   1224 bytes  → 0x4C8 << 16
+# Same trap as WRITEI/READI on the PCM side: getting the size
+# wrong here makes the kernel dispatcher fall through to -ENOTTY.
 enum AlsaCtl {
     SNDRV_CTL_IOCTL_CARD_INFO   = 0x81785501;
-    SNDRV_CTL_IOCTL_ELEM_LIST   = 0xC1185510;
+    SNDRV_CTL_IOCTL_ELEM_LIST   = 0xC0505510;
     SNDRV_CTL_IOCTL_ELEM_INFO   = 0xC1105511;
     SNDRV_CTL_IOCTL_ELEM_READ   = 0xC4C85512;
     SNDRV_CTL_IOCTL_ELEM_WRITE  = 0xC4C85513;
@@ -1486,25 +1852,234 @@ fn vani_mixer_fd(m)   { return load64(m); }
 fn vani_mixer_card(m) { return load64(m + 8); }
 
 # ================================================================
-# Volume / mute — placeholder API
+# Element info query — internal helper
 # ================================================================
-# The real implementations need snd_ctl_elem_id (16-byte iface +
-# device + subdevice + name + index) plus snd_ctl_elem_value
-# (variant union sized to 1024 bytes). Land those in v0.3.0 once
-# the descriptor layout is locked in tests against real hardware.
+# Builds the 272-byte snd_ctl_elem_info struct, runs ELEM_INFO,
+# returns 0 on success and fills `info` with the result. Callers
+# read type / access / count / integer.{min,max,step} from `info`.
+
+fn _vani_mixer_elem_info(m, elem_name, info) {
+    memset(info, 0, CTL_ELEM_INFO_SIZE);
+    _ctl_elem_id_init(info, SNDRV_CTL_ELEM_IFACE_MIXER, elem_name);
+    return syscall(16, vani_mixer_fd(m), SNDRV_CTL_IOCTL_ELEM_INFO, info);
+}
+
+# ================================================================
+# Volume — read / write
+# ================================================================
+# ALSA mixer volume controls are integer-typed in [min, max] (per
+# device). We translate "percent" 0..100 to the device's native
+# range and write the same value to all channels. Reading returns
+# the percent of channel 0 (left) — most consumers don't care about
+# per-channel skew at this layer; v0.4.0+ can add explicit
+# per-channel APIs if a use case appears.
 
 fn vani_mixer_set_volume(m, elem_name, percent) {
     if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
     if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
     if (percent < 0)    { return vani_err_result(VANI_ERR_MIXER_ELEM); }
     if (percent > 100)  { return vani_err_result(VANI_ERR_MIXER_ELEM); }
-    return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-        "mixer ELEM_WRITE struct packing pending — see roadmap v0.3.0");
+
+    var info[272];
+    var r = _vani_mixer_elem_info(m, elem_name, &info);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_INFO failed");
+    }
+    var t = load32(&info + CTL_ELEM_INFO_TYPE);
+    if (t != SNDRV_CTL_ELEM_TYPE_INTEGER) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+            "element is not INTEGER-typed");
+    }
+    var min = load64(&info + CTL_ELEM_INFO_INTEGER_MIN);
+    var max = load64(&info + CTL_ELEM_INFO_INTEGER_MAX);
+    var count = load32(&info + CTL_ELEM_INFO_COUNT);
+    if (count == 0) {
+        return vani_err_result(VANI_ERR_MIXER_ELEM);
+    }
+    var target = min + (max - min) * percent / 100;
+
+    var val[1224];
+    memset(&val, 0, CTL_ELEM_VALUE_SIZE);
+    _ctl_elem_id_init(&val, SNDRV_CTL_ELEM_IFACE_MIXER, elem_name);
+    var i = 0;
+    while (i < count) {
+        store64(&val + CTL_ELEM_VALUE_INT_BASE + i * 8, target);
+        i = i + 1;
+    }
+    r = syscall(16, vani_mixer_fd(m), SNDRV_CTL_IOCTL_ELEM_WRITE, &val);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_WRITE failed");
+    }
+    return vani_ok(percent);
 }
+
+fn vani_mixer_get_volume(m, elem_name) {
+    if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+
+    var info[272];
+    var r = _vani_mixer_elem_info(m, elem_name, &info);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_INFO failed");
+    }
+    var t = load32(&info + CTL_ELEM_INFO_TYPE);
+    if (t != SNDRV_CTL_ELEM_TYPE_INTEGER) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+            "element is not INTEGER-typed");
+    }
+    var min = load64(&info + CTL_ELEM_INFO_INTEGER_MIN);
+    var max = load64(&info + CTL_ELEM_INFO_INTEGER_MAX);
+    if (max == min) {
+        return vani_ok(0);
+    }
+
+    var val[1224];
+    memset(&val, 0, CTL_ELEM_VALUE_SIZE);
+    _ctl_elem_id_init(&val, SNDRV_CTL_ELEM_IFACE_MIXER, elem_name);
+    r = syscall(16, vani_mixer_fd(m), SNDRV_CTL_IOCTL_ELEM_READ, &val);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_READ failed");
+    }
+    var raw = load64(&val + CTL_ELEM_VALUE_INT_BASE);
+    var percent = (raw - min) * 100 / (max - min);
+    return vani_ok(percent);
+}
+
+# ================================================================
+# Mute — read / write
+# ================================================================
+# Mute switches are BOOLEAN-typed in ALSA: value 0 = muted, 1 = on.
+# Vani's `muted` arg is the human direction (1 = muted), so we
+# invert when writing.
 
 fn vani_mixer_set_mute(m, elem_name, muted) {
     if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
     if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
-    return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-        "mixer ELEM_WRITE struct packing pending — see roadmap v0.3.0");
+
+    var info[272];
+    var r = _vani_mixer_elem_info(m, elem_name, &info);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_INFO failed");
+    }
+    var t = load32(&info + CTL_ELEM_INFO_TYPE);
+    if (t != SNDRV_CTL_ELEM_TYPE_BOOLEAN) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+            "element is not BOOLEAN-typed");
+    }
+    var count = load32(&info + CTL_ELEM_INFO_COUNT);
+    var alsa_value = 1;
+    if (muted == 1) { alsa_value = 0; }
+
+    var val[1224];
+    memset(&val, 0, CTL_ELEM_VALUE_SIZE);
+    _ctl_elem_id_init(&val, SNDRV_CTL_ELEM_IFACE_MIXER, elem_name);
+    var i = 0;
+    while (i < count) {
+        store64(&val + CTL_ELEM_VALUE_INT_BASE + i * 8, alsa_value);
+        i = i + 1;
+    }
+    r = syscall(16, vani_mixer_fd(m), SNDRV_CTL_IOCTL_ELEM_WRITE, &val);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_WRITE failed");
+    }
+    return vani_ok(muted);
+}
+
+fn vani_mixer_get_mute(m, elem_name) {
+    if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+
+    var val[1224];
+    memset(&val, 0, CTL_ELEM_VALUE_SIZE);
+    _ctl_elem_id_init(&val, SNDRV_CTL_ELEM_IFACE_MIXER, elem_name);
+    var r = syscall(16, vani_mixer_fd(m), SNDRV_CTL_IOCTL_ELEM_READ, &val);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_READ failed");
+    }
+    var alsa_value = load64(&val + CTL_ELEM_VALUE_INT_BASE);
+    var muted = 0;
+    if (alsa_value == 0) { muted = 1; }
+    return vani_ok(muted);
+}
+
+# ================================================================
+# Element enumeration
+# ================================================================
+# Two-step ELEM_LIST: first call with space=0 returns the count,
+# second call with space=count fills an array of snd_ctl_elem_id
+# structs. Caller owns the returned buffer and the count.
+#
+# Returns Result<list_handle> where list_handle is a 24-byte
+# struct:
+#   +0  count    i64
+#   +8  pids     ptr to count × 64-byte snd_ctl_elem_id
+#   +16 capacity i64 (= count × 64; for free-by-caller if needed)
+
+enum VaniMixerListLayout {
+    VANI_LIST_SIZE     = 24;
+    VANI_LIST_COUNT    = 0;
+    VANI_LIST_PIDS     = 8;
+    VANI_LIST_CAPACITY = 16;
+}
+
+fn vani_mixer_list_count(lh)    { return load64(lh + VANI_LIST_COUNT); }
+fn vani_mixer_list_pids(lh)     { return load64(lh + VANI_LIST_PIDS); }
+
+# Get a pointer to the i-th snd_ctl_elem_id in the list (64 bytes).
+fn vani_mixer_list_id_at(lh, i) {
+    if (i < 0)                           { return 0; }
+    if (i >= vani_mixer_list_count(lh))  { return 0; }
+    return vani_mixer_list_pids(lh) + i * CTL_ELEM_ID_SIZE;
+}
+
+# Copy the name of the i-th element into `out` (must be ≥ 45 bytes).
+# Returns out, or 0 if i is out of range.
+fn vani_mixer_list_name(lh, i, out) {
+    var idp = vani_mixer_list_id_at(lh, i);
+    if (idp == 0) { return 0; }
+    return _ctl_elem_id_get_name(idp, 0, out);
+}
+
+fn vani_mixer_list_elements(m) {
+    if (m == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    var fd = vani_mixer_fd(m);
+
+    # First pass: get count (space=0, pids=NULL).
+    var list[80];
+    memset(&list, 0, CTL_ELEM_LIST_SIZE);
+    var r = syscall(16, fd, SNDRV_CTL_IOCTL_ELEM_LIST, &list);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+            "ELEM_LIST count pass failed");
+    }
+    var count = load32(&list + CTL_ELEM_LIST_COUNT);
+    if (count == 0) {
+        var lh = alloc(VANI_LIST_SIZE);
+        store64(lh + VANI_LIST_COUNT, 0);
+        store64(lh + VANI_LIST_PIDS, 0);
+        store64(lh + VANI_LIST_CAPACITY, 0);
+        return vani_ok(lh);
+    }
+
+    # Second pass: fill array.
+    var cap = count * CTL_ELEM_ID_SIZE;
+    var pids = alloc(cap);
+    memset(pids, 0, cap);
+    memset(&list, 0, CTL_ELEM_LIST_SIZE);
+    # space + pids fields below — list buffer is reused.
+    store32(&list + CTL_ELEM_LIST_OFFSET, 0);
+    store32(&list + CTL_ELEM_LIST_SPACE,  count);
+    store64(&list + CTL_ELEM_LIST_PIDS,   pids);
+    r = syscall(16, fd, SNDRV_CTL_IOCTL_ELEM_LIST, &list);
+    if (r < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+            "ELEM_LIST fill pass failed");
+    }
+    var used = load32(&list + CTL_ELEM_LIST_USED);
+
+    var lh = alloc(VANI_LIST_SIZE);
+    store64(lh + VANI_LIST_COUNT, used);
+    store64(lh + VANI_LIST_PIDS,  pids);
+    store64(lh + VANI_LIST_CAPACITY, cap);
+    return vani_ok(lh);
 }
