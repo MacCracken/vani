@@ -121,19 +121,45 @@ fn main() {
     _puti(vani_bytes_per_frame(fmt));
     _puts("\n");
 
-    # 4. Verify state hasn't changed — simplified configure
-    # doesn't transition the kernel state machine.
+    # 4. Verify state transitioned to SETUP. Real HW_PARAMS
+    # ioctl runs inside vani_configure (v0.2.0+).
     var st1 = vani_state(d);
     _puts("  state-after-configure: ");
     _puti(st1);
     _puts(" (");
     _puts(_state_name(st1));
     _puts(")\n");
+    if (st1 != SND_PCM_STATE_SETUP) {
+        _puts("  expected SETUP after HW_PARAMS — bailing\n");
+        vani_close(d);
+        return 1;
+    }
 
-    # 5. Close
+    # 5. Prepare — should transition SETUP → PREPARED
+    var pres = vani_prepare(d);
+    if (is_ok(pres) == 0) {
+        _puts("  prepare: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(pres)));
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    var st2 = vani_state(d);
+    _puts("  state-after-prepare: ");
+    _puti(st2);
+    _puts(" (");
+    _puts(_state_name(st2));
+    _puts(")\n");
+    if (st2 != SND_PCM_STATE_PREPARED) {
+        _puts("  expected PREPARED after PREPARE — bailing\n");
+        vani_close(d);
+        return 1;
+    }
+
+    # 6. Close
     vani_close(d);
     _puts("  close: OK\n");
-    _puts("PROBE PASS — open/configure/close roundtrip on real hardware\n");
+    _puts("PROBE PASS — open/configure/prepare/close roundtrip on real hardware\n");
     return 0;
 }
 

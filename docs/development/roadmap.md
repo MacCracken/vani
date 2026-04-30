@@ -65,17 +65,18 @@ the tree, builds today, fails at prepare until HW_PARAMS lands.
 
 ## v0.2.0 — HW_PARAMS + benchmarks
 
-The simplified `audio_set_params` path stores rate / channels /
-bit_depth on the handle but doesn't actually negotiate with the
-kernel. v0.2.0 lands the real ioctl.
+The simplified `audio_set_params` path stored rate / channels /
+bit_depth on the handle without negotiating with the kernel.
+v0.2.0 lands the real ioctl, unblocking the OPEN → SETUP →
+PREPARED state transition that `programs/play_tone.cyr` needs.
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | P(-1) sweep before opening v0.2.0 work | Not started |
-| 2 | Full `SNDRV_PCM_IOCTL_HW_PARAMS` struct (608 B) — interval / mask arrays packed | Not started |
+| 1 | P(-1) sweep before opening v0.2.0 work | Rolled into 2026-04-30 sweep |
+| 2 | Full `SNDRV_PCM_IOCTL_HW_PARAMS` struct (608 B) — interval / mask arrays packed | Done — `src/alsa.cyr` |
 | 3 | `SNDRV_PCM_IOCTL_HW_REFINE` for capability query | Not started |
 | 4 | `vani_format_negotiate(d, preferred)` — picks closest supported format | Not started |
-| 5 | Onboard audio integration test (real PCM round-trip) | Not started |
+| 5 | Onboard audio integration test (real PCM round-trip via `play_tone.cyr`) | Builds clean; user runs to verify audible output |
 | 6 | USB audio integration test | Not started |
 | 7 | HDMI audio integration test | Not started |
 | 8 | `tests/bcyr/vani.bcyr` — CPU-only benches for ring + format math | Not started |

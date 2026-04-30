@@ -67,9 +67,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without producing audio. Verified PASS on the dev box's
   onboard analog out (`pcmC1D0p`).
 - `programs/play_tone.cyr` — v0.2.0 acceptance fixture (440 Hz
-  square wave, 200 ms, 48 kHz stereo S16_LE). Kept in the tree;
-  builds today; will fail at prepare until v0.2.0 lands the full
-  `SNDRV_PCM_IOCTL_HW_PARAMS` 608-byte struct packing.
+  square wave, 200 ms, 48 kHz stereo S16_LE). Builds clean and is
+  ready to actually emit sound after v0.2.0 #2 (below) — user
+  runs it manually since it's audible.
+
+### v0.2.0 progress (in-flight)
+
+- **#2 — full `SNDRV_PCM_IOCTL_HW_PARAMS` (608-byte struct)**:
+  done. `audio_set_params` now packs the real ioctl struct with
+  ACCESS, FORMAT, SUBFORMAT mask constraints and CHANGES, RATE
+  exact-value intervals; period / buffer / fifo left "any" so the
+  kernel picks defaults. Verified on real hardware via
+  `programs/probe.cyr` — full OPEN → SETUP → PREPARED state
+  transition works against onboard analog out (`pcmC1D0p`).
+- New constants in `src/alsa.cyr`: `AlsaHwParam` (mask + interval
+  param indices), `AlsaSubformat`, `AlsaIntervalFlag`,
+  `AlsaHwParamsLayout` (struct offsets pinned).
+- Internal helpers: `_hwp_init_any`, `_hwp_mask_set_value`,
+  `_hwp_interval_set_exact`, `_alsa_format_for_bits`.
+- Test suite gains a `hw_params` group: 8 test functions /
+  33 assertions covering struct layout offsets, mask / interval
+  manipulation, and bit_depth → AlsaFormat mapping. Total suite
+  82 → 115 assertions, all passing.
+- `programs/probe.cyr` extended to call `vani_prepare` and verify
+  `SETUP → PREPARED` transition on real hardware.
 
 ### Architecture
 

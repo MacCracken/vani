@@ -117,6 +117,148 @@ enum AlsaPcmState {
 }
 
 # ================================================================
+# HW_PARAMS struct constants (vani v0.2.0)
+# ================================================================
+# `struct snd_pcm_hw_params` is 608 bytes:
+#   +0   flags         u32
+#   +4   masks[3]      3 × 32 bytes = 96 B  (ACCESS, FORMAT, SUBFORMAT)
+#   +100 mres[5]       5 × 32 bytes = 160 B (reserved)
+#   +260 intervals[12] 12 × 12 B    = 144 B (SAMPLE_BITS..TICK_TIME)
+#   +404 ires[9]       9 × 12 B     = 108 B (reserved)
+#   +512 rmask         u32 — params requested by caller
+#   +516 cmask         u32 — params changed by kernel
+#   +520 info          u32 — info flags
+#   +524 msbits        u32 — most significant bits per sample
+#   +528 rate_num      u32
+#   +532 rate_den      u32
+#   +536 fifo_size     u64
+#   +544 reserved      64 B
+#
+# Each `snd_mask` is 8 u32 words = 256 bits (one per format /
+# access value). Each `snd_interval` is 12 bytes:
+#   +0 min, +4 max, +8 flags (openmin:1, openmax:1, integer:1, empty:1).
+
+enum AlsaHwParam {
+    SNDRV_PCM_HW_PARAM_ACCESS         = 0;
+    SNDRV_PCM_HW_PARAM_FORMAT         = 1;
+    SNDRV_PCM_HW_PARAM_SUBFORMAT      = 2;
+    SNDRV_PCM_HW_PARAM_FIRST_MASK     = 0;
+    SNDRV_PCM_HW_PARAM_LAST_MASK      = 2;
+    SNDRV_PCM_HW_PARAM_SAMPLE_BITS    = 10;
+    SNDRV_PCM_HW_PARAM_FRAME_BITS     = 11;
+    SNDRV_PCM_HW_PARAM_CHANNELS       = 12;
+    SNDRV_PCM_HW_PARAM_RATE           = 13;
+    SNDRV_PCM_HW_PARAM_PERIOD_TIME    = 14;
+    SNDRV_PCM_HW_PARAM_PERIOD_SIZE    = 15;
+    SNDRV_PCM_HW_PARAM_PERIOD_BYTES   = 16;
+    SNDRV_PCM_HW_PARAM_PERIODS        = 17;
+    SNDRV_PCM_HW_PARAM_BUFFER_TIME    = 18;
+    SNDRV_PCM_HW_PARAM_BUFFER_SIZE    = 19;
+    SNDRV_PCM_HW_PARAM_BUFFER_BYTES   = 20;
+    SNDRV_PCM_HW_PARAM_TICK_TIME      = 21;
+    SNDRV_PCM_HW_PARAM_FIRST_INTERVAL = 10;
+    SNDRV_PCM_HW_PARAM_LAST_INTERVAL  = 21;
+}
+
+enum AlsaSubformat {
+    SND_PCM_SUBFORMAT_STD = 0;
+}
+
+enum AlsaIntervalFlag {
+    SND_INTERVAL_OPENMIN = 1;
+    SND_INTERVAL_OPENMAX = 2;
+    SND_INTERVAL_INTEGER = 4;
+    SND_INTERVAL_EMPTY   = 8;
+}
+
+enum AlsaHwParamsLayout {
+    HWP_SIZE         = 608;
+    HWP_MASKS_BASE   = 4;
+    HWP_MASK_BYTES   = 32;
+    HWP_INTERVAL_BASE = 260;
+    HWP_INTERVAL_BYTES = 12;
+    HWP_RMASK_OFF    = 512;
+    HWP_CMASK_OFF    = 516;
+}
+
+# ================================================================
+# HW_PARAMS struct helpers — internal
+# ================================================================
+
+fn _hwp_mask_off(mask_idx) {
+    return HWP_MASKS_BASE + mask_idx * HWP_MASK_BYTES;
+}
+
+# Interval index here is the array slot (0..11), not the param
+# number — caller subtracts FIRST_INTERVAL when calling.
+fn _hwp_interval_off(int_idx) {
+    return HWP_INTERVAL_BASE + int_idx * HWP_INTERVAL_BYTES;
+}
+
+# Fill every mask with all-bits-set and every interval with
+# [0, UINT_MAX]. The kernel then narrows according to the
+# constraints we apply afterwards. rmask=all → "request every param".
+fn _hwp_init_any(hwp) {
+    memset(hwp, 0, HWP_SIZE);
+    var mi = 0;
+    while (mi < 3) {
+        var moff = _hwp_mask_off(mi);
+        var w = 0;
+        while (w < 8) {
+            store32(hwp + moff + w * 4, 0 - 1);
+            w = w + 1;
+        }
+        mi = mi + 1;
+    }
+    var ii = 0;
+    while (ii < 12) {
+        var ioff = _hwp_interval_off(ii);
+        store32(hwp + ioff + 0, 0);
+        store32(hwp + ioff + 4, 0 - 1);
+        store32(hwp + ioff + 8, 0);
+        ii = ii + 1;
+    }
+    store32(hwp + HWP_RMASK_OFF, 0 - 1);
+    return 0;
+}
+
+# Constrain a mask to a single value (zero all bits, then set the
+# bit at position `value`). value is in [0, 255] for 256-bit masks.
+fn _hwp_mask_set_value(hwp, mask_idx, value) {
+    var moff = _hwp_mask_off(mask_idx);
+    var w = 0;
+    while (w < 8) {
+        store32(hwp + moff + w * 4, 0);
+        w = w + 1;
+    }
+    var word = value / 32;
+    var bit  = value & 31;
+    var slot = hwp + moff + word * 4;
+    store32(slot, load32(slot) | (1 << bit));
+    return 0;
+}
+
+# Constrain an interval to an exact value: min=max=value, integer flag set.
+fn _hwp_interval_set_exact(hwp, int_idx, value) {
+    var ioff = _hwp_interval_off(int_idx);
+    store32(hwp + ioff + 0, value);
+    store32(hwp + ioff + 4, value);
+    store32(hwp + ioff + 8, SND_INTERVAL_INTEGER);
+    return 0;
+}
+
+# Map bit_depth → AlsaFormat enum. Signed LE for 8/16/24/32.
+# Float / unsigned / BE go through the explicit format API in a
+# later minor.
+fn _alsa_format_for_bits(bit_depth) {
+    if (bit_depth == 8)  { return SND_PCM_FORMAT_S8; }
+    if (bit_depth == 16) { return SND_PCM_FORMAT_S16_LE; }
+    if (bit_depth == 24) { return SND_PCM_FORMAT_S24_LE; }
+    if (bit_depth == 32) { return SND_PCM_FORMAT_S32_LE; }
+    return 0 - 1;
+}
+
+# ================================================================
 # Audio device handle
 # ================================================================
 # Layout (32 bytes):
@@ -172,21 +314,60 @@ fn audio_channels(dev) { return load64(dev + 16); }
 fn audio_bit_depth(dev) { return load64(dev + 24); }
 
 # ================================================================
-# Hardware params (simplified)
+# Hardware params — full SNDRV_PCM_IOCTL_HW_PARAMS (v0.2.0)
 # ================================================================
-# The full snd_pcm_hw_params struct is 608 bytes with interval / mask
-# arrays. This provides a simplified interface using
-# SNDRV_PCM_IOCTL_HW_PARAMS — vani v0.2.0 will land the full
-# negotiation ioctl.
+# Builds the 608-byte struct in stack scratch space, sets all params
+# to "any" (all bits set / [0, UINT_MAX]), then constrains:
+#   ACCESS    = RW_INTERLEAVED
+#   FORMAT    = derived from bit_depth (signed LE for 8/16/24/32)
+#   SUBFORMAT = STD
+#   CHANNELS  = exact value passed
+#   RATE      = exact value passed
+# Period / buffer / fifo are left "any" — the kernel picks defaults
+# for the device, which is the right behaviour for v0.2.0. v0.4.0
+# adds explicit `audio_set_period` / `audio_set_buffer` for
+# low-latency callers.
+#
+# Returns 0 on success, negative on failure (errno-shaped).
 
-# Set sample rate, channels, and bit depth on device
 fn audio_set_params(dev, rate, channels, bit_depth) {
+    if (dev == 0)       { return 0 - 1; }
+    if (rate <= 0)      { return 0 - 1; }
+    if (channels <= 0)  { return 0 - 1; }
+    var fmt = _alsa_format_for_bits(bit_depth);
+    if (fmt < 0)        { return 0 - 1; }
+
+    var hwp[608];
+    _hwp_init_any(&hwp);
+
+    # ACCESS = RW_INTERLEAVED. Most reliable across drivers.
+    _hwp_mask_set_value(&hwp,
+        SNDRV_PCM_HW_PARAM_ACCESS,
+        SND_PCM_ACCESS_RW_INTERLEAVED);
+
+    # FORMAT — derived from bit_depth.
+    _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
+
+    # SUBFORMAT = STD. Required — leaving "any" rejects on some drivers.
+    _hwp_mask_set_value(&hwp,
+        SNDRV_PCM_HW_PARAM_SUBFORMAT,
+        SND_PCM_SUBFORMAT_STD);
+
+    # CHANNELS, RATE — exact. interval slot = param - FIRST_INTERVAL.
+    _hwp_interval_set_exact(&hwp,
+        SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        channels);
+    _hwp_interval_set_exact(&hwp,
+        SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        rate);
+
+    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
+    if (r < 0) { return r; }
+
+    # Cache the negotiated params on the handle for later queries.
     store64(dev + 8, rate);
     store64(dev + 16, channels);
     store64(dev + 24, bit_depth);
-    # Full HW params setup requires the 608-byte struct. For now we
-    # store params and write directly — callers using the simplified
-    # path inherit the kernel default period/buffer sizes.
     return 0;
 }
 
