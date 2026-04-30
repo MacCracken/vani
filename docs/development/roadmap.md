@@ -1,207 +1,197 @@
 # Vani Development Roadmap
 
-> **v0.1.0** — Restarted scaffold (2026-04-30). Audio device I/O for Cyrius.
+Forward-looking only. `CHANGELOG.md` is the authoritative record of
+completed work — don't duplicate it here. Latest P(-1) audit at
+`docs/audit/2026-04-30-audit.md`.
 
-The path to v1.0.0 is four minors (v0.2.0–v0.4.0 + v1.0.0) plus a
-recurring P(-1) scaffold-hardening pass that runs before each
-minor cut. The v5.8.0 fold-in into cyrius is a cross-cut tracked
-in `cyrius-stdlib-fold-in.md` and cyrius's own roadmap (v5.8.0
-section, "Vani audio distlib fold-in").
+## Handoff — pick up here when yukti 2.2.0 ships
 
-## P(-1) — Scaffold hardening (continuous; first pass before v0.2.0)
+Vani's v0.3.0 multi-device path is the only thing blocked on
+upstream right now. Yukti 2.1.2 captured the audio-domain
+punch list at
+[`yukti/docs/development/roadmap.md`](https://github.com/MacCracken/yukti/blob/main/docs/development/roadmap.md)
+(local: `~/Repos/yukti/docs/development/roadmap.md`).
 
-Runs before every minor bump. Models mabda's P(-1) — the goal is
-"land features only on a clean tree". Items 5–7 (CVE research +
-audit) are the part the user explicitly called out and should
-**never** be skipped, even on a quiet release.
+When yukti 2.2.0 ships and `lib/yukti.cyr` exposes the audio
+descriptor surface (`yukti_audio_devices`, `yukti_audio_card`,
+`yukti_audio_device`, `yukti_audio_subdevice`,
+`yukti_audio_direction`, `yukti_audio_name`, `yukti_audio_hw_id`),
+do this in vani in order:
 
-| # | Item | Trigger |
-|---|------|---------|
-| 0 | Read CHANGELOG, roadmap, prior audit — know what was intended | each P(-1) |
-| 1 | Cleanliness: `cyrius build programs/smoke.cyr` (0 warnings), `cyrius lint` (0 warnings), `cyrius fmt --check` diff-clean, `cyrius vet programs/smoke.cyr` clean | each P(-1) |
-| 2 | Test sweep: `cyrius test tests/tcyr/vani.tcyr` 100 % pass | each P(-1) |
-| 3 | `cyrius distlib` regenerates `dist/vani.cyr` diff-clean | each P(-1) |
-| 4 | Benchmark baseline: `cyrius bench tests/bcyr/vani.bcyr` (once v0.2.0 lands the bench harness) | each P(-1) from v0.2.0+ |
-| 5 | **External CVE / 0-day research (web)** — see "Security & CVE sweep" section below | each P(-1) |
-| 6 | Internal deep review — gaps, correctness, docs, FFI offsets, struct-packing math | each P(-1) |
-| 7 | Security audit — file findings in `docs/audit/YYYY-MM-DD-audit.md` | each P(-1) |
-| 8 | Regression tests for HIGH / MED findings — every fix lands with an assertion that would have caught the original bug | each P(-1) |
-| 9 | Post-review benchmarks — prove the wins (if any) | each P(-1) from v0.2.0+ |
-| 10 | Documentation audit — CLAUDE.md, roadmap, CHANGELOG, audit index | each P(-1) |
+1. **Re-resolve deps**: `rm -rf lib && mkdir lib && cyrius deps`.
+   The yukti 2.2.0 bundle should now contain the audio surface.
+   Quick sanity: `grep '^fn yukti_audio_' lib/yukti.cyr` should
+   list at least the seven accessors above.
+2. **Replace the stub**: `src/device.cyr` `vani_open_yukti(desc,
+   direction)` currently returns
+   `VANI_ERR_YUKTI_DESCRIPTOR` with a "pending — see roadmap
+   v0.3.0" detail. Replace the body with: read card / device
+   / subdevice / direction off the yukti descriptor, route to
+   `audio_open_playback(card, device)` or
+   `audio_open_capture(card, device)`, wrap the result via the
+   existing `_vani_device_wrap` helper (pass through the same
+   direction value yukti returned — yukti's
+   `YUKTI_AUDIO_PLAYBACK = 0` / `_CAPTURE = 1` matches vani's
+   `VaniDirection` 1:1 by design, so it's a copy not a map).
+3. **Add CPU tests**: hand-build a fake yukti `AudioDeviceInfo`
+   buffer with known field values, call `vani_open_yukti`
+   against a closed device fd path (which will fail at the
+   real `open()` syscall, but the field-extraction path runs
+   first — verify the right card / device get pulled). Or
+   easier: test the pure-data accessor projection without
+   actually opening anything.
+4. **Add a `vani_devices_for_direction(direction)`
+   convenience wrapper**: take a yukti vec, filter by
+   direction, return a vec of vani-friendly descriptors.
+   Saves consumers from importing yukti directly.
+5. **`programs/devices.cyr`**: CLI that calls
+   `yukti_audio_devices()`, prints each entry with vani's
+   formatting, then opens the first playback device via
+   `vani_open_yukti` and runs the same sequence as
+   `programs/probe.cyr` (open → state → configure → state →
+   close). Real-HW PASS on the dev box's onboard audio is the
+   acceptance gate.
+6. **CHANGELOG entry** under `[0.1.0] — Unreleased` for the
+   v0.3.0 #8/#9 items now closing.
+7. **Run the full P(-1) sweep before tagging 0.3.0**:
+   - cleanliness gates (build / lint / fmt / vet)
+   - test suite 100% pass (was 249/249 at handoff)
+   - distlib diff-clean
+   - bench baseline against `bench-history.csv`
+   - **CVE / 0-day web research** — see "Security & CVE sweep
+     cadence" below; specifically look for any new
+     `sound/usb`, `sound/core`, or aloop CVEs since
+     2026-04-30.
+   - File new audit doc at `docs/audit/YYYY-MM-DD-audit.md`.
+8. **Tag 0.3.0** once #1–#7 above are clean. Update
+   `cyrius/cyrius.cyml` `[deps.vani]` (or stdlib pin)
+   alongside, since the 5.8.0 fold-in pin needs to point at
+   whatever vani version is current at cut time.
 
-A P(-1) pass with no findings still ships — at minimum it produces
-a dated audit doc that says "swept, clean as of YYYY-MM-DD against
-kernel X.Y, no new ALSA / sound CVEs since prior sweep."
+## Next minor — v0.4.0
 
-## v0.1.0 — Foundation (current)
+The latency / SW_PARAMS / suspend-resume / preset work landed
+already; one open item before the 0.4.0 tag:
 
-| # | Item | Status |
-|---|------|--------|
-| 1 | Manifest on `cyrius.cyml` (5.7.39 pin) | Done |
-| 2 | `src/lib.cyr` include chain | Done |
-| 3 | Absorb `cyrius/lib/audio.cyr` → `src/alsa.cyr` | Done |
-| 4 | `VaniErr` + Result helpers | Done |
-| 5 | `VaniFormat` + frame/byte math | Done |
-| 6 | Pow-of-2 ring buffer | Done |
-| 7 | `VaniDevice` handle wrapping `alsa.cyr` | Done |
-| 8 | `vani_play` + XRUN re-prepare retry | Done |
-| 9 | `vani_record` + XRUN re-prepare retry | Done |
-| 10 | Smoke link-check program | Done |
-| 11 | CPU-only test suite (62 assertions) | Done |
-| 12 | Cyrius 5.8.0 fold-in plan documented | Done |
-| 13 | `dist/vani.cyr` via `cyrius distlib` | Done |
-| 14 | First P(-1) scaffold-hardening pass | Done — `docs/audit/2026-04-30-audit.md` |
-| 15 | Real-hardware probe (open / configure / state / close on `pcmC1D0p`) | Done — `programs/probe.cyr` PASS on real HW |
-| 16 | Tag `0.1.0` on `main` once 14 + 15 close | Ready — both prereqs done |
+- [ ] **XRUN-rate benchmark under sustained load** — a stress
+      harness that runs continuous playback for minutes,
+      injects CPU contention (e.g. competing `while(1)` thread
+      or external `stress-ng`), and counts XRUN events. New
+      CSV row in `bench-history.csv` with the load-driven xrun
+      rate per preset (low-latency vs casual). Useful number:
+      "0 xruns under N% CPU contention for M minutes" — sets
+      a baseline for ecosystem consumers to regress against.
+      Skipped for the v0.1.x cuts because reproducing CPU
+      contention reliably needs more setup than a typical
+      P(-1) gate.
 
-Note: full PCM round-trip (prepare + write + capture) is blocked on
-the simplified `audio_set_params` path — `vani_prepare` needs the
-kernel in SETUP state, which requires
-`SNDRV_PCM_IOCTL_HW_PARAMS`. That ships in v0.2.0 #2. The
-v0.1.0 integration test scope is "syscall plumbing reaches the
-kernel and back"; full audio I/O is v0.2.0's gate.
-`programs/play_tone.cyr` is the v0.2.0 acceptance fixture — kept in
-the tree, builds today, fails at prepare until HW_PARAMS lands.
+## v0.5.x — hardware coverage (HW-gated)
 
-## v0.2.0 — HW_PARAMS + benchmarks
+Need access to non-onboard audio to close out v0.2.0 #6 / #7:
 
-The simplified `audio_set_params` path stored rate / channels /
-bit_depth on the handle without negotiating with the kernel.
-v0.2.0 lands the real ioctl, unblocking the OPEN → SETUP →
-PREPARED state transition that `programs/play_tone.cyr` needs.
-
-| # | Item | Status |
-|---|------|--------|
-| 1 | P(-1) sweep before opening v0.2.0 work | Rolled into 2026-04-30 sweep |
-| 2 | Full `SNDRV_PCM_IOCTL_HW_PARAMS` struct (608 B) — interval / mask arrays packed | Done — `src/alsa.cyr` |
-| 3 | `SNDRV_PCM_IOCTL_HW_REFINE` for capability query | Done — `audio_query_caps`, `audio_can_set_params`, `programs/caps.cyr` PASS on real HW |
-| 4 | `vani_format_negotiate(d, preferred)` — picks closest supported format | Done — `src/device.cyr`; quality walk S32→S24→S16→S8→U8 |
-| 5 | Onboard audio integration test (real PCM round-trip) | Done — `programs/throughput.cyr` 9600/9600 frames, 0 xruns on `pcmC1D0p` |
-| 6 | USB audio integration test | Not started — needs different HW |
-| 7 | HDMI audio integration test | Not started — needs different HW |
-| 8 | `tests/bcyr/vani.bcyr` — CPU-only benches for ring + format math | Done — 13 benches, baseline in `bench-history.csv` |
-| 9 | Latency / throughput / underrun-rate measurements (CSV history) | Throughput done (`programs/throughput.cyr`); latency + load-driven underrun-rate deferred to v0.4.0 |
-| 10 | Tag `0.2.0` | Pending — items 6/7 are HW-gated (skip) and 9 partially deferred |
-
-## v0.3.0 — Mixer + yukti adapter
-
-The control device is its own fd surface; vani v0.1.0 ships open /
-close + the ioctl number table. v0.3.0 fills in the per-element
-struct packing.
-
-| # | Item | Status |
-|---|------|--------|
-| 1 | P(-1) sweep before opening v0.3.0 work | Rolled into 2026-04-30 sweep + post-audit findings |
-| 2 | `snd_ctl_elem_id` (64 B) packing | Done — `src/alsa.cyr` |
-| 3 | `snd_ctl_elem_value` (1224 B) packing | Done — `src/alsa.cyr` |
-| 4 | `vani_mixer_set_volume` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Done — `src/mixer.cyr` |
-| 5 | `vani_mixer_set_mute` — real `SNDRV_CTL_IOCTL_ELEM_WRITE` | Done — `src/mixer.cyr` |
-| 6 | `vani_mixer_list_elements` — `SNDRV_CTL_IOCTL_ELEM_LIST` enumeration | Done — 38 elements enumerated on real HW |
-| 7 | `vani_mixer_get_volume` / `vani_mixer_get_mute` (read path) | Done — `src/mixer.cyr` |
-| 8 | `vani_open_yukti(desc, direction)` — typed yukti audio descriptor adapter | **Blocked upstream** — yukti 2.1.1 is storage-only (UDEV / MBR / GPT); no audio device discovery. Needs yukti to grow `yukti_audio_*` surface first. |
-| 9 | Multi-device routing helpers (onboard / USB / HDMI selection) | **Blocked** — depends on #8 |
-| 10 | Tag `0.3.0` | Ready for tag — items 8/9 are upstream work, can ship 0.3.0 with mixer-only and pick them up in 0.3.1 once yukti lands audio. |
-
-## v0.4.0 — Latency + correctness
-
-Pro-audio readiness. The simplified path uses kernel-default
-period / buffer sizes; v0.4.0 makes them tunable and adds the
-state-machine pieces (suspend/resume, typed state enum).
-
-| # | Item | Status |
-|---|------|--------|
-| 1 | P(-1) sweep before opening v0.4.0 work | Rolled into 2026-04-30 sweep + post-audit findings |
-| 2 | Configurable buffer size on configure (`period_size`, `periods`) | Done — `audio_set_params_full` + `vani_configure_buffered` |
-| 3 | `SNDRV_PCM_IOCTL_SW_PARAMS` (start_threshold, stop_threshold, avail_min) | Done — `audio_set_sw_params` + `vani_set_sw_params` |
-| 4 | Suspend / resume support (handle `SUSPENDED` → `audio_resume` retry) | Done — `audio_resume` + `vani_resume`; playback/capture recovery paths handle SUSPENDED |
-| 5 | `audio_get_state` → typed `VaniState` enum (replace raw int returns) | Done — `VaniState` enum + `vani_state_typed` + `vani_state_name` |
-| 6 | Low-latency mode preset (period × 4, tight thresholds) | Done — `vani_configure_low_latency` (10 ms × 4 = 40 ms; HDA Generic won't accept sub-10ms periods, dedicated USB DACs can call `vani_configure_buffered` directly) |
-| 7 | Casual-playback preset (16 ms × 4 = 64 ms ring) | Done — `vani_configure_casual` |
-| 8 | XRUN-rate benchmark on real hardware under load | Not started — needs sustained-stress harness; punt to v0.4.x patch |
-| 9 | Tag `0.4.0` | Pending — items 2-7 done, #8 deferred |
-
-## Cyrius 5.8.0 fold-in (cross-cut)
-
-Cyrius has committed to the fold-in for v5.8.0 — see [cyrius
-roadmap §v5.8.0 "Vani audio distlib fold-in"](../../../cyrius/docs/development/roadmap.md)
-(local path) and `docs/development/cyrius-stdlib-fold-in.md` for
-the concrete steps. Pinned 2026-04-30.
-
-**Vani-side prerequisites for the cyrius pin:**
-
-| # | Item | Status |
-|---|------|--------|
-| 1 | Tag a public release the `[deps.vani]` block can pin to | Not started — first tag is `0.1.0` |
-| 2 | At least one P(-1) sweep on record (audit doc) | Not started |
-| 3 | Real-hardware integration test passing (onboard audio minimum) | Not started — v0.1.0 #15 |
-| 4 | `dist/vani.cyr` reproducible from `cyrius distlib` | Done |
-
-**Cyrius-side work** (handled in the cyrius repo, not vani):
-
-1. Add `[deps.vani]` block to `cyrius/cyrius.cyml` — pinned to
-   whatever vani tag ships at 5.8.0 cut time
-2. Delete `cyrius/lib/audio.cyr` (236 LOC)
-3. CHANGELOG entry calling out the include-path swap
-4. Pre-flight `grep -rn 'lib/audio.cyr' /home/macro/Repos` — confirm
-   no in-tree consumer still imports the old path
-5. Refresh stdlib-reference + ecosystem.cyml — vani joins
-   mabda / sankoch / sigil / yukti / sandhi
-
-The `audio_*` API surface is byte-for-byte stable through the
-fold-in. Whichever vani version is current at 5.8.0 cut becomes
-the pinned tag — could be 0.1.0 (minimum), more likely 0.3.0+
-once mixer + yukti adapter are real.
+- [ ] **USB audio interface integration test** — `programs/probe.cyr`
+      + `programs/play_tone.cyr` + `programs/throughput.cyr`
+      against a real USB DAC. Target: dedicated USB-class card
+      (Behringer UCA222, Focusrite Scarlett, etc.). Verifies
+      that the same code path that works on HDA Generic also
+      works on `snd-usb-audio` — different period grain
+      constraints, different mixer element names.
+- [ ] **HDMI audio integration test** — same harness against
+      `pcmC0D{3,7,8,9}p` on the dev box's existing card 0
+      (HDMI). Different IEC958 / channel-map constraints.
+- [ ] **Sub-10ms low-latency on USB audio** — onboard HDA
+      Generic rejected sub-10ms periods (kernel BDL
+      alignment); USB-class cards typically accept down to
+      256 frames. Verify and add a `vani_configure_pro_audio`
+      preset (5ms × 4 = 20ms) that gates on the device's
+      reported minimum period.
 
 ## v1.0.0 — Stable
 
 | # | Item | Status |
 |---|------|--------|
-| 1 | P(-1) sweep with zero HIGH / CRIT findings | Not started |
-| 2 | `dist/vani.cyr` shipped as Cyrius stdlib bundle (5.8.0+) | Not started |
-| 3 | Tested on 3+ hardware targets (onboard, USB, HDMI minimum) | Not started |
-| 4 | First downstream consumer landed: `cyrius-doom` audio upgrade (PC speaker → real audio) | Not started |
-| 5 | Second downstream consumer: at least one of jalwa / dhvani / agnoshi | Not started |
-| 6 | Public API frozen; SemVer guarantees from here | Not started |
-| 7 | API surface diff via `cyrius_api_surface` is captured as the v1 baseline | Not started |
-| 8 | CHANGELOG migration-guide entry for any pre-1.0 breaking changes | Not started |
+| 1 | Multi-hardware integration coverage (3+ targets) | Onboard HDA verified; USB + HDMI gated on access (see v0.5.x above) |
+| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | Awaits cyrius-doom integration |
+| 3 | Second downstream consumer: one of `jalwa` / `dhvani` / `agnoshi` | Awaits those projects |
+| 4 | API surface diff via `cyrius_api_surface` captured as v1 baseline | Toolchain ships the tool (5.7.33) — run when the API stops moving |
+| 5 | Public API frozen; SemVer guarantees | Set after 1–3 land |
+| 6 | Migration-guide entry for any pre-1.0 breaking changes | Aggregate from CHANGELOG when freezing |
+
+## Cyrius 5.8.0 fold-in (cross-cut)
+
+Cyrius's roadmap §v5.8.0 commits to bundling vani as a sibling
+distlib alongside mabda / sankoch / sigil / yukti / sandhi.
+Vani-side prereqs are met (dist bundle reproducible, audit on
+record, real-HW probe + throughput PASS). The cyrius-side work
+(add `[deps.vani]` to `cyrius/cyrius.cyml`, delete
+`cyrius/lib/audio.cyr`, refresh stdlib reference) lives in the
+cyrius repo, not here. Vani waits for the cut and then has
+nothing further to do — the byte-stable `audio_*` API surface
+covers existing consumers transparently.
+
+See `docs/development/cyrius-stdlib-fold-in.md` for the full
+plan.
+
+## P(-1) — Scaffold hardening (recurring)
+
+Runs before every minor cut. Items 5–7 (CVE research + audit
+filing) are non-negotiable, even on a quiet release.
+
+| # | Item | Trigger |
+|---|------|---------|
+| 0 | Read CHANGELOG, prior audit — know what's been touched | each P(-1) |
+| 1 | Cleanliness: `cyrius build programs/smoke.cyr` (0 warnings), `cyrius lint` (0 warnings), `cyrius fmt --check` diff-clean, `cyrius vet programs/smoke.cyr` clean | each P(-1) |
+| 2 | Test sweep: `cyrius test tests/tcyr/vani.tcyr` 100 % pass | each P(-1) |
+| 3 | `cyrius distlib` regenerates `dist/vani.cyr` diff-clean | each P(-1) |
+| 4 | Benchmark baseline: `cyrius bench tests/bcyr/vani.bcyr` against `bench-history.csv` | each P(-1) |
+| 5 | **External CVE / 0-day research (web)** — see scope below | each P(-1) |
+| 6 | Internal deep review — gaps, correctness, FFI struct offsets, ioctl size encoding | each P(-1) |
+| 7 | Security audit — file findings in `docs/audit/YYYY-MM-DD-audit.md` | each P(-1) |
+| 8 | Regression assertions for HIGH / MED findings | each P(-1) |
+| 9 | Post-review benchmarks — prove any wins | each P(-1) |
+| 10 | Documentation audit — CLAUDE.md, roadmap, CHANGELOG, audit index | each P(-1) |
+
+A clean sweep still ships an audit doc — at minimum: "swept,
+clean as of YYYY-MM-DD against kernel X.Y, no new ALSA / sound
+CVEs since prior sweep."
 
 ## Security & CVE sweep cadence
 
-The "external research" item in the P(-1) checklist is a
-deliberate web-research pass — not a one-off. Search the public
-record for what changed in the audio subsystems we touch since
-the prior sweep, then map findings to vani code paths.
+Each P(-1) sweep covers:
 
-**Each P(-1) sweep:**
-
-1. **Linux kernel ALSA CVEs since the prior sweep** — search
-   `cve.org` and the kernel security mailing list (`oss-security@`)
-   for `ALSA`, `snd_pcm_*`, `snd_ctl_*`, `sound/core`, `sound/pcm`,
-   `sound/usb`, `sound/hda`. Map each hit to: does vani's ioctl
-   path go through this code? if yes, what's the input we send
-   that could trigger it?
+1. **Linux kernel ALSA CVEs since prior sweep** — `cve.org`,
+   `oss-security@`, kernel security ML for `ALSA`,
+   `snd_pcm_*`, `snd_ctl_*`, `sound/core`, `sound/pcm`,
+   `sound/usb`, `sound/hda`. Map each hit to vani's ioctl
+   surface — does our path touch the affected code, what
+   input could trigger it.
 2. **ALSA UAPI struct drift** — diff
    `include/uapi/sound/asound.h` between the kernel range we
-   support and current mainline. Vani's ioctl numbers and struct
-   offsets in `src/alsa.cyr` + `src/mixer.cyr` must still match.
-3. **USB-audio class CVEs** — `linux-usb`, `sound/usb/*`. Relevant
-   when the device handle came from a USB sound card via yukti.
-4. **PulseAudio / PipeWire CVEs** — only relevant if vani ever
-   gains a non-direct path. Today this is a no-op (vani is
-   ioctl-only) but recorded so the answer is "N/A — direct ALSA
-   only" rather than "did not check".
-5. **Cyrius compiler CVEs** — toolchain we compile against. Track
-   the cyrius CHANGELOG for security-tagged entries.
-6. **`audio_*` / `vani_*` static analysis** — re-run `cyrius vet`
-   + `cyrius lint` against the full src/ tree. New rules added to
-   the linter between sweeps catch new bug classes for free.
+   support and current mainline. Vani's ioctl numbers and
+   struct offsets in `src/alsa.cyr` + `src/mixer.cyr` must
+   still match. The two HIGH-severity post-audit findings
+   from 2026-04-30 (WRITEI/READI/ELEM_LIST size mis-encoding)
+   are exactly the bug class this sweep catches; pinning
+   tests in `tests/tcyr/vani.tcyr::test_ioctl_size_encoding_*`
+   guard against regression.
+3. **USB-audio class CVEs** — `linux-usb` ML, `sound/usb/*`.
+   Relevant when device handle came from a USB sound card via
+   yukti.
+4. **PulseAudio / PipeWire CVEs** — N/A (vani is ioctl-only),
+   but record the answer rather than skip the question.
+5. **Cyrius compiler CVEs** — track cyrius CHANGELOG for
+   security-tagged entries.
+6. **Static analysis sweep** — re-run `cyrius vet` +
+   `cyrius lint` against the full src/ tree. New rules added
+   between sweeps catch new bug classes for free.
 
-**Findings doc**: `docs/audit/YYYY-MM-DD-audit.md` per sweep, with
-severity (CRIT / HIGH / MED / LOW), file, line, class, mitigation.
-HIGH+ findings block the next minor cut until fixed and
-regression-tested.
+**Findings doc**: `docs/audit/YYYY-MM-DD-audit.md` per sweep,
+with severity (CRIT / HIGH / MED / LOW), file, line, class,
+mitigation. HIGH+ findings block the next minor cut until
+fixed and regression-tested.
 
-**Cadence**: minimum once per minor bump; additionally any time a
-public CVE drops against ALSA core / sound/pcm / sound/control
-that scores ≥ 7.0. The cadence is calendar-loose: the trigger is
-"new release approaching" or "new CVE landed", not a fixed date.
+**Cadence**: minimum once per minor bump; additionally any time
+a public CVE drops against ALSA core / sound/pcm / sound/control
+that scores ≥ 7.0. The cadence is calendar-loose: trigger is
+"new release approaching" or "new CVE landed", not a fixed
+date.

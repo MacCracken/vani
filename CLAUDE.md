@@ -9,8 +9,11 @@ Cyrius ecosystem. The voice of the system.
 - **Type**: Cyrius library (include-chain) + dist bundle
 - **License**: GPL-3.0-only
 - **Language**: Cyrius 5.7.39 (`cyrius.cyml: cyrius = "5.7.39"`)
-- **Version**: 0.1.0 — pre-implementation scaffold
-- **Status**: Restarted 2026-04-30 after a partial-push lost the prior tree
+- **Version**: 0.1.0 — `[Unreleased]`; foundation through latency
+  presets all landed and verified on real onboard audio (HDA
+  Generic). One blocker remains: yukti 2.2.0 audio domain (vani
+  v0.3.0 #8/#9). See `docs/development/roadmap.md` "Handoff"
+  section for the entry point.
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 
 ## Goal
@@ -89,8 +92,17 @@ the `cyrius` repo, cut a release, bump `cyrius = "x.y.z"` in
 ```bash
 cyrius deps                                            # resolve stdlib into lib/
 cyrius build programs/smoke.cyr build/vani_smoke       # link-check
-cyrius test tests/tcyr/vani.tcyr                       # CPU assertions
+cyrius test tests/tcyr/vani.tcyr                       # 249 CPU assertions
+cyrius bench tests/bcyr/vani.bcyr                      # 13 CPU benches
 cyrius distlib                                         # → dist/vani.cyr
+
+# Real-HW programs (default card 1 device 0 — edit constants for your box):
+./build/vani_probe                                     # silent — open/configure/prepare/close
+./build/vani_caps                                      # silent — capabilities + negotiate
+./build/vani_throughput                                # silent — 200 ms playback measurement
+./build/vani_mixer_test                                # silent — list mixer elements + values
+./build/vani_latency_test                              # silent — both presets back-to-back
+./build/vani_tone                                      # AUDIBLE — 200 ms 440 Hz square wave
 ```
 
 ## Architecture (flat — matches mabda / yukti / vidya)
@@ -110,7 +122,15 @@ vani/
 ├── tests/
 │   └── tcyr/vani.tcyr      — CPU-only suite (error, format, buffer, device)
 ├── programs/
-│   └── smoke.cyr           — link-check for the full include chain
+│   ├── smoke.cyr           — link-check for the full include chain
+│   ├── probe.cyr           — open / configure / prepare / state / close (silent)
+│   ├── play_tone.cyr       — 200 ms 440 Hz square wave (audible — user-run)
+│   ├── caps.cyr            — HW_REFINE capability probe + negotiate exerciser
+│   ├── throughput.cyr      — 200 ms silence playback, frames/sec + xrun count
+│   ├── mixer_test.cyr      — read-only mixer enumeration (38 elements on real HW)
+│   └── latency_test.cyr    — low-latency + casual presets back-to-back
+├── tests/bcyr/vani.bcyr   — 13 CPU benches (format / ring / hwp / negotiate)
+├── bench-history.csv      — bench baseline (timestamp,commit,branch,name,ns)
 ├── docs/
 │   ├── architecture/overview.md
 │   └── development/
