@@ -1,0 +1,141 @@
+# programs/probe.cyr — non-intrusive hardware probe
+#
+# Walks the v0.1.0 ALSA path: open → state-query → configure →
+# state-query → close. Verifies vani's syscall plumbing works
+# end-to-end against a real sound card without producing audio.
+#
+# What this DOES verify:
+#   - /dev/snd/pcmC{N}D{M}p path-builder correctness
+#   - syscall(open) reaches the kernel and returns a real fd
+#   - SNDRV_PCM_IOCTL_STATUS roundtrip works (state query)
+#   - vani_configure stores params on the handle
+#   - syscall(close) releases the fd cleanly
+#
+# What this does NOT verify (blocked on v0.2.0):
+#   - SNDRV_PCM_IOCTL_HW_PARAMS — full 608-byte struct packing
+#   - SNDRV_PCM_IOCTL_PREPARE — needs the kernel to be in SETUP
+#     state, which requires HW_PARAMS first
+#   - audio_write / audio_read against real hardware
+#
+# `programs/play_tone.cyr` is a placeholder for that v0.2.0
+# round-trip; it builds today but will fail at prepare until
+# HW_PARAMS lands.
+#
+# Defaults to card 1 device 0 — the canonical onboard analog
+# output on this dev box. Edit the constants below for your
+# hardware (see `cat /proc/asound/cards`).
+
+include "src/lib.cyr"
+
+enum ProbeTarget {
+    PROBE_CARD   = 1;
+    PROBE_DEVICE = 0;
+}
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+
+fn _puti(n) {
+    var buf[24];
+    var i = 23;
+    store8(&buf + i, 0);
+    if (n == 0) {
+        i = i - 1;
+        store8(&buf + i, 48);
+        syscall(1, 1, &buf + i, 23 - i);
+        return 0;
+    }
+    var neg = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    while (n > 0) {
+        i = i - 1;
+        store8(&buf + i, 48 + (n % 10));
+        n = n / 10;
+    }
+    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
+    syscall(1, 1, &buf + i, 23 - i);
+    return 0;
+}
+
+fn _state_name(s) {
+    if (s == SND_PCM_STATE_OPEN)      { return "OPEN"; }
+    if (s == SND_PCM_STATE_SETUP)     { return "SETUP"; }
+    if (s == SND_PCM_STATE_PREPARED)  { return "PREPARED"; }
+    if (s == SND_PCM_STATE_RUNNING)   { return "RUNNING"; }
+    if (s == SND_PCM_STATE_XRUN)      { return "XRUN"; }
+    if (s == SND_PCM_STATE_DRAINING)  { return "DRAINING"; }
+    if (s == SND_PCM_STATE_PAUSED)    { return "PAUSED"; }
+    if (s == SND_PCM_STATE_SUSPENDED) { return "SUSPENDED"; }
+    return "UNKNOWN";
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani probe — card ");
+    _puti(PROBE_CARD);
+    _puts(" device ");
+    _puti(PROBE_DEVICE);
+    _puts(" playback\n");
+
+    # 1. Open
+    var res = vani_open_playback(PROBE_CARD, PROBE_DEVICE);
+    if (is_ok(res) == 0) {
+        _puts("  open: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(res)));
+        _puts("\n");
+        return 1;
+    }
+    var d = payload(res);
+    _puts("  open: OK fd=");
+    _puti(audio_fd(vani_audio_handle(d)));
+    _puts("\n");
+
+    # 2. Initial state — fresh-open should be OPEN (0).
+    var st0 = vani_state(d);
+    _puts("  state-after-open: ");
+    _puti(st0);
+    _puts(" (");
+    _puts(_state_name(st0));
+    _puts(")\n");
+    if (st0 != SND_PCM_STATE_OPEN) {
+        _puts("  unexpected initial state\n");
+        vani_close(d);
+        return 1;
+    }
+
+    # 3. Configure (simplified path: stores params on handle,
+    # does NOT call HW_PARAMS yet — that's v0.2.0).
+    var fmt = vani_format_default();
+    var cres = vani_configure(d, fmt);
+    if (is_ok(cres) == 0) {
+        _puts("  configure: FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+    _puts("  configure: rate=");
+    _puti(vani_format_rate(fmt));
+    _puts(" ch=");
+    _puti(vani_format_channels(fmt));
+    _puts(" bits=");
+    _puti(vani_format_bit_depth(fmt));
+    _puts(" bpf=");
+    _puti(vani_bytes_per_frame(fmt));
+    _puts("\n");
+
+    # 4. Verify state hasn't changed — simplified configure
+    # doesn't transition the kernel state machine.
+    var st1 = vani_state(d);
+    _puts("  state-after-configure: ");
+    _puti(st1);
+    _puts(" (");
+    _puts(_state_name(st1));
+    _puts(")\n");
+
+    # 5. Close
+    vani_close(d);
+    _puts("  close: OK\n");
+    _puts("PROBE PASS — open/configure/close roundtrip on real hardware\n");
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

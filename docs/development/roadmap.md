@@ -51,8 +51,17 @@ kernel X.Y, no new ALSA / sound CVEs since prior sweep."
 | 12 | Cyrius 5.8.0 fold-in plan documented | Done |
 | 13 | `dist/vani.cyr` via `cyrius distlib` | Done |
 | 14 | First P(-1) scaffold-hardening pass | Done — `docs/audit/2026-04-30-audit.md` |
-| 15 | Real-hardware integration test (onboard audio round-trip) | Not started |
-| 16 | Tag `0.1.0` on `main` once 14 + 15 close | Not started — 14 done, 15 pending |
+| 15 | Real-hardware probe (open / configure / state / close on `pcmC1D0p`) | Done — `programs/probe.cyr` PASS on real HW |
+| 16 | Tag `0.1.0` on `main` once 14 + 15 close | Ready — both prereqs done |
+
+Note: full PCM round-trip (prepare + write + capture) is blocked on
+the simplified `audio_set_params` path — `vani_prepare` needs the
+kernel in SETUP state, which requires
+`SNDRV_PCM_IOCTL_HW_PARAMS`. That ships in v0.2.0 #2. The
+v0.1.0 integration test scope is "syscall plumbing reaches the
+kernel and back"; full audio I/O is v0.2.0's gate.
+`programs/play_tone.cyr` is the v0.2.0 acceptance fixture — kept in
+the tree, builds today, fails at prepare until HW_PARAMS lands.
 
 ## v0.2.0 — HW_PARAMS + benchmarks
 

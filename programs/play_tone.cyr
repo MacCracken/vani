@@ -1,0 +1,117 @@
+# programs/play_tone.cyr — write a brief 440 Hz square wave
+#
+# **STATUS (v0.1.0): blocked at prepare.** The simplified
+# `audio_set_params` path stores rate/channels/bit_depth on the
+# handle but does not call `SNDRV_PCM_IOCTL_HW_PARAMS`, so the
+# kernel state machine never leaves OPEN. `vani_prepare` requires
+# SETUP, so this program will fail at the prepare step until
+# v0.2.0 lands the full 608-byte HW_PARAMS struct packing.
+#
+# Kept in the tree as a v0.2.0 acceptance fixture — once HW_PARAMS
+# is real, this program plays a tone end-to-end with no further
+# code changes.
+#
+# Generates ~200 ms of 440 Hz square wave at 48 kHz stereo S16_LE
+# and writes it through vani_play.
+#
+# **Audible (when v0.2.0 unblocks it).** Emits sound at amplitude
+# ±4000 (~-18 dBFS). Check headphone / speaker volume before
+# running.
+#
+# Defaults to card 1 device 0 — edit the constants for your box.
+
+include "src/lib.cyr"
+
+enum ToneCfg {
+    TONE_CARD       = 1;
+    TONE_DEVICE     = 0;
+    TONE_RATE       = 48000;
+    TONE_FREQ_HZ    = 440;
+    TONE_DURATION_MS = 200;
+    TONE_AMPLITUDE  = 4000;
+}
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+
+# Store an i16 little-endian at p (low byte first).
+fn _store_i16le(p, v) {
+    store8(p,     v & 255);
+    store8(p + 1, (v >> 8) & 255);
+    return 0;
+}
+
+# Build a stereo S16_LE square-wave buffer.
+# Returns pointer to a freshly-allocated byte buffer of size
+# `frames * 4` bytes (4 = 2 channels * 2 bytes).
+fn _build_square_wave(frames) {
+    var bytes = frames * 4;
+    var buf = alloc(bytes);
+    var period = TONE_RATE / TONE_FREQ_HZ;  # ~109 samples / cycle
+    var half = period / 2;                  # ~54 samples
+    var amp_pos = TONE_AMPLITUDE;
+    var amp_neg = 0 - TONE_AMPLITUDE;
+    var i = 0;
+    while (i < frames) {
+        var phase = i - ((i / period) * period);  # i % period
+        var s = amp_neg;
+        if (phase < half) { s = amp_pos; }
+        var off = i * 4;
+        _store_i16le(buf + off,     s);  # left
+        _store_i16le(buf + off + 2, s);  # right
+        i = i + 1;
+    }
+    return buf;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani tone — 440 Hz square, 200 ms, card ");
+    syscall(1, 1, "1 device 0\n", 11);
+
+    var res = vani_open_playback(TONE_CARD, TONE_DEVICE);
+    if (is_ok(res) == 0) {
+        _puts("open: FAIL\n");
+        return 1;
+    }
+    var d = payload(res);
+
+    var cres = vani_configure(d, vani_format_default());
+    if (is_ok(cres) == 0) {
+        _puts("configure: FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+
+    var pres = vani_prepare(d);
+    if (is_ok(pres) == 0) {
+        _puts("prepare: FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+
+    # 200 ms × 48000 frames/s / 1000 = 9600 frames
+    var frames = (TONE_RATE * TONE_DURATION_MS) / 1000;
+    var buf = _build_square_wave(frames);
+    _puts("generated ");
+    var fb[16];
+    # quick stderr-style report not strictly needed — just play.
+
+    var play_res = vani_play(d, buf, frames);
+    if (is_ok(play_res) == 0) {
+        _puts("play: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(play_res)));
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    _puts("wrote frames; xrun_count=");
+    syscall(1, 1, "?\n", 2);
+
+    vani_drain(d);
+    vani_close(d);
+    _puts("TONE PASS\n");
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

@@ -61,6 +61,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/tcyr/vani.tcyr` grows an `audit-2026-04-30` group: 8 test
   functions / 20 assertions. Suite total 62 → 82 assertions, all
   passing.
+- `programs/probe.cyr` — first real-hardware integration test.
+  Walks vani's syscall path end-to-end (open / state-query /
+  configure / state-query / close) against `/dev/snd/pcmC{N}D{M}p`
+  without producing audio. Verified PASS on the dev box's
+  onboard analog out (`pcmC1D0p`).
+- `programs/play_tone.cyr` — v0.2.0 acceptance fixture (440 Hz
+  square wave, 200 ms, 48 kHz stereo S16_LE). Kept in the tree;
+  builds today; will fail at prepare until v0.2.0 lands the full
+  `SNDRV_PCM_IOCTL_HW_PARAMS` 608-byte struct packing.
 
 ### Architecture
 
