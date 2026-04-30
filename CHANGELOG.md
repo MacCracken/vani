@@ -92,6 +92,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `programs/probe.cyr` extended to call `vani_prepare` and verify
   `SETUP → PREPARED` transition on real hardware.
 
+- **#3 — `SNDRV_PCM_IOCTL_HW_REFINE` capability query**: done.
+  - `audio_query_caps(dev, hwp)` — fills hwp with all-bits-set,
+    runs HW_REFINE, returns the kernel-narrowed view of what the
+    device actually supports.
+  - `audio_can_set_params(dev, rate, channels, bit_depth)` —
+    cheap "is this combo supported" probe via HW_REFINE; no
+    state transition.
+  - HW_REFINE result readers: `_hwp_mask_has_bit`,
+    `_hwp_interval_min`, `_hwp_interval_max`,
+    `_hwp_interval_contains`.
+  - `_alsa_bits_for_format` — inverse of `_alsa_format_for_bits`.
+- **#4 — `vani_format_negotiate(d, preferred)`**: done. Returns
+  `Result<VaniFormat>` with channels/rate clamped to device's
+  supported range and format quality-walked
+  S32→S24→S16→S8→U8 when preferred isn't available. Plus
+  `vani_format_is_supported(d, fmt)` for boolean queries.
+- `programs/caps.cyr` — capability probe that prints the device's
+  supported channel range, rate range, period / buffer ranges,
+  and format set, then exercises `vani_format_negotiate` against
+  two preferred formats. PASS on real HW (card 1 device 0
+  reports stereo-only, 44.1k–192k Hz, S16_LE+S32_LE; negotiation
+  correctly clamped 8-channel preferred to 2-channel actual).
+- Test suite gains an `hw_refine` group: 10 test fns / 31
+  assertions covering mask/interval readers, clamp, and the
+  negotiation picker (preferred-supported, fall-back paths,
+  empty-mask, quality preference). Total 115 → 146 assertions.
+
 ### Architecture
 
 - vani is now the single audio authority in stdlib (mirrors mabda

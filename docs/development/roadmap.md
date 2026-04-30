@@ -74,8 +74,8 @@ PREPARED state transition that `programs/play_tone.cyr` needs.
 |---|------|--------|
 | 1 | P(-1) sweep before opening v0.2.0 work | Rolled into 2026-04-30 sweep |
 | 2 | Full `SNDRV_PCM_IOCTL_HW_PARAMS` struct (608 B) — interval / mask arrays packed | Done — `src/alsa.cyr` |
-| 3 | `SNDRV_PCM_IOCTL_HW_REFINE` for capability query | Not started |
-| 4 | `vani_format_negotiate(d, preferred)` — picks closest supported format | Not started |
+| 3 | `SNDRV_PCM_IOCTL_HW_REFINE` for capability query | Done — `audio_query_caps`, `audio_can_set_params`, `programs/caps.cyr` PASS on real HW |
+| 4 | `vani_format_negotiate(d, preferred)` — picks closest supported format | Done — `src/device.cyr`; quality walk S32→S24→S16→S8→U8 |
 | 5 | Onboard audio integration test (real PCM round-trip via `play_tone.cyr`) | Builds clean; user runs to verify audible output |
 | 6 | USB audio integration test | Not started |
 | 7 | HDMI audio integration test | Not started |

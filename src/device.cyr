@@ -139,3 +139,94 @@ fn vani_open_yukti(yukti_desc, direction) {
     return vani_err_result_msg(VANI_ERR_YUKTI_DESCRIPTOR,
         "yukti audio descriptor adapter pending — see roadmap v0.3.0");
 }
+
+# ================================================================
+# Format negotiation (v0.2.0)
+# ================================================================
+# Consumer says "I want this format ideally" — vani asks the
+# device what it actually supports via HW_REFINE, then picks the
+# closest match. Returns Result<VaniFormat ptr>.
+#
+# Strategy:
+#   1. Query device capabilities once via audio_query_caps.
+#   2. RATE     — clamp preferred to [min, max]; if min==max use
+#                 that exact value (typical for fixed-rate cards).
+#   3. CHANNELS — clamp preferred to [min, max].
+#   4. FORMAT   — preferred bit set? use it. Otherwise walk
+#                 quality preference S32 → S24 → S16 → S8 → U8.
+#   5. Build a fresh VaniFormat from the negotiated values.
+#
+# Cheap (one ioctl, one alloc). Doesn't recurse / iterate.
+
+fn _negotiate_format_pick(hwp, preferred_fmt) {
+    var fmt_mask_idx = SNDRV_PCM_HW_PARAM_FORMAT;
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, preferred_fmt) == 1) {
+        return preferred_fmt;
+    }
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, SND_PCM_FORMAT_S32_LE) == 1) {
+        return SND_PCM_FORMAT_S32_LE;
+    }
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, SND_PCM_FORMAT_S24_LE) == 1) {
+        return SND_PCM_FORMAT_S24_LE;
+    }
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, SND_PCM_FORMAT_S16_LE) == 1) {
+        return SND_PCM_FORMAT_S16_LE;
+    }
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, SND_PCM_FORMAT_S8) == 1) {
+        return SND_PCM_FORMAT_S8;
+    }
+    if (_hwp_mask_has_bit(hwp, fmt_mask_idx, SND_PCM_FORMAT_U8) == 1) {
+        return SND_PCM_FORMAT_U8;
+    }
+    return 0 - 1;
+}
+
+fn _clamp(value, lo, hi) {
+    if (value < lo) { return lo; }
+    if (value > hi) { return hi; }
+    return value;
+}
+
+fn vani_format_negotiate(d, preferred) {
+    if (d == 0)         { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (preferred == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+
+    var hwp[608];
+    var r = audio_query_caps(vani_audio_handle(d), &hwp);
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_HW_PARAMS);
+    }
+
+    var ch_slot   = SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    var rate_slot = SNDRV_PCM_HW_PARAM_RATE     - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+
+    var ch_pick = _clamp(
+        vani_format_channels(preferred),
+        _hwp_interval_min(&hwp, ch_slot),
+        _hwp_interval_max(&hwp, ch_slot));
+
+    var rate_pick = _clamp(
+        vani_format_rate(preferred),
+        _hwp_interval_min(&hwp, rate_slot),
+        _hwp_interval_max(&hwp, rate_slot));
+
+    var fmt_pick = _negotiate_format_pick(&hwp, vani_format_alsa(preferred));
+    if (fmt_pick < 0) {
+        return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED);
+    }
+    var bits_pick = _alsa_bits_for_format(fmt_pick);
+
+    return vani_ok(vani_format_new(rate_pick, ch_pick, bits_pick, fmt_pick));
+}
+
+# Convenience: query whether an exact format is supported on this
+# device. Returns 1 yes, 0 no.
+fn vani_format_is_supported(d, fmt) {
+    if (d == 0)   { return 0; }
+    if (fmt == 0) { return 0; }
+    return audio_can_set_params(
+        vani_audio_handle(d),
+        vani_format_rate(fmt),
+        vani_format_channels(fmt),
+        vani_format_bit_depth(fmt));
+}

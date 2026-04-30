@@ -373,6 +373,136 @@ fn test_alsa_format_for_bits() {
     return 0;
 }
 
+fn test_alsa_bits_for_format() {
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_S8),       8,  "S8");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_U8),       8,  "U8");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_S16_LE),   16, "S16_LE");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_S24_LE),   24, "S24_LE");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_S32_LE),   32, "S32_LE");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_FLOAT_LE), 32, "FLOAT_LE");
+    assert_eq(_alsa_bits_for_format(99),                       0,  "unknown → 0");
+    return 0;
+}
+
+# ================================================================
+# v0.2.0 — HW_REFINE readers + format negotiation
+# ================================================================
+
+fn test_hwp_mask_has_bit_after_init_any() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    # All bits set in the 3 active masks, so any bit query is 1.
+    assert_eq(_hwp_mask_has_bit(hwp, 0, 0),   1, "ACCESS bit 0");
+    assert_eq(_hwp_mask_has_bit(hwp, 1, 2),   1, "FORMAT S16_LE");
+    assert_eq(_hwp_mask_has_bit(hwp, 1, 14),  1, "FORMAT FLOAT_LE");
+    assert_eq(_hwp_mask_has_bit(hwp, 2, 0),   1, "SUBFORMAT STD");
+    return 0;
+}
+
+fn test_hwp_mask_has_bit_after_constraint() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    _hwp_mask_set_value(hwp, 1, SND_PCM_FORMAT_S16_LE);
+    assert_eq(_hwp_mask_has_bit(hwp, 1, SND_PCM_FORMAT_S16_LE), 1, "S16_LE on");
+    assert_eq(_hwp_mask_has_bit(hwp, 1, SND_PCM_FORMAT_S32_LE), 0, "S32_LE off");
+    assert_eq(_hwp_mask_has_bit(hwp, 1, SND_PCM_FORMAT_S8),     0, "S8 off");
+    return 0;
+}
+
+fn test_hwp_mask_has_bit_out_of_range() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    assert_eq(_hwp_mask_has_bit(hwp, 0, 0 - 1), 0, "negative bit");
+    assert_eq(_hwp_mask_has_bit(hwp, 0, 256),   0, "bit > 255");
+    return 0;
+}
+
+fn test_hwp_interval_readers() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    _hwp_interval_set_exact(hwp, 3, 48000);
+    assert_eq(_hwp_interval_min(hwp, 3), 48000, "min");
+    assert_eq(_hwp_interval_max(hwp, 3), 48000, "max");
+    assert_eq(_hwp_interval_contains(hwp, 3, 48000), 1, "contains exact");
+    assert_eq(_hwp_interval_contains(hwp, 3, 47999), 0, "below");
+    assert_eq(_hwp_interval_contains(hwp, 3, 48001), 0, "above");
+    return 0;
+}
+
+fn test_clamp() {
+    assert_eq(_clamp(50, 0, 100),  50, "in range");
+    assert_eq(_clamp(0 - 5, 0, 100), 0, "below clamps to lo");
+    assert_eq(_clamp(150, 0, 100), 100, "above clamps to hi");
+    assert_eq(_clamp(0, 0, 100),   0, "at lo");
+    assert_eq(_clamp(100, 0, 100), 100, "at hi");
+    return 0;
+}
+
+# Negotiate-format picker: preferred supported → return preferred.
+fn test_negotiate_picks_preferred_when_supported() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_S16_LE);
+    assert_eq(picked, SND_PCM_FORMAT_S16_LE, "preferred S16_LE");
+    return 0;
+}
+
+# Preferred not supported, S32_LE supported → return S32_LE.
+fn test_negotiate_falls_back_to_s32() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    # Constrain FORMAT mask to ONLY S32_LE.
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_S32_LE);
+    # Ask for FLOAT_LE (not in mask) — should fall back to S32_LE.
+    var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_FLOAT_LE);
+    assert_eq(picked, SND_PCM_FORMAT_S32_LE, "fallback S32_LE");
+    return 0;
+}
+
+# Only S8 supported → return S8 even when preferred is S24_LE.
+fn test_negotiate_falls_back_to_s8() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_S8);
+    var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_S24_LE);
+    assert_eq(picked, SND_PCM_FORMAT_S8, "fallback S8");
+    return 0;
+}
+
+# Empty mask (no formats) → -1.
+fn test_negotiate_no_formats_returns_neg() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    # Clear FORMAT mask entirely.
+    var moff = _hwp_mask_off(SNDRV_PCM_HW_PARAM_FORMAT);
+    var w = 0;
+    while (w < 8) { store32(hwp + moff + w * 4, 0); w = w + 1; }
+    var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_S16_LE);
+    assert_eq(picked, 0 - 1, "no formats → -1");
+    return 0;
+}
+
+# Quality preference: when multiple formats supported, S32_LE wins
+# over S16_LE / S8 if preferred isn't in the mask.
+fn test_negotiate_quality_preference() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    # Clear mask, then enable S32_LE + S16_LE + S8 only.
+    var moff = _hwp_mask_off(SNDRV_PCM_HW_PARAM_FORMAT);
+    var w = 0;
+    while (w < 8) { store32(hwp + moff + w * 4, 0); w = w + 1; }
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_S32_LE);
+    # _hwp_mask_set_value clears first then sets bit, so we re-set the others manually.
+    var slot0 = hwp + moff;
+    store32(slot0, load32(slot0)
+        | (1 << SND_PCM_FORMAT_S16_LE)
+        | (1 << SND_PCM_FORMAT_S8));
+    # FLOAT_LE not in mask — quality walk picks S32_LE first.
+    var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_FLOAT_LE);
+    assert_eq(picked, SND_PCM_FORMAT_S32_LE, "quality picks S32 over S16/S8");
+    return 0;
+}
+
 # ================================================================
 # Test runner
 # ================================================================
@@ -425,6 +555,19 @@ fn main() {
     test_hwp_mask_set_value_high_bit();
     test_hwp_interval_set_exact_writes_min_max_flag();
     test_alsa_format_for_bits();
+    test_alsa_bits_for_format();
+
+    test_group("hw_refine");
+    test_hwp_mask_has_bit_after_init_any();
+    test_hwp_mask_has_bit_after_constraint();
+    test_hwp_mask_has_bit_out_of_range();
+    test_hwp_interval_readers();
+    test_clamp();
+    test_negotiate_picks_preferred_when_supported();
+    test_negotiate_falls_back_to_s32();
+    test_negotiate_falls_back_to_s8();
+    test_negotiate_no_formats_returns_neg();
+    test_negotiate_quality_preference();
 
     assert_summary();
     return 0;

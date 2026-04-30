@@ -1,0 +1,176 @@
+# programs/caps.cyr — capability query via SNDRV_PCM_IOCTL_HW_REFINE
+#
+# Opens a playback device and asks the kernel "what does this card
+# actually support?" via HW_REFINE (no state transition). Prints
+# the supported channel range, rate range, and which formats are
+# available. Then runs vani_format_negotiate against a 48 kHz
+# stereo S16_LE preferred and reports what came back.
+#
+# Roadmap v0.2.0 #3 (HW_REFINE) + #4 (vani_format_negotiate).
+#
+# Defaults to card 1 device 0 — edit for your hardware.
+
+include "src/lib.cyr"
+
+enum CapsTarget {
+    CAPS_CARD   = 1;
+    CAPS_DEVICE = 0;
+}
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+
+fn _puti(n) {
+    var buf[24];
+    var i = 23;
+    store8(&buf + i, 0);
+    if (n == 0) {
+        i = i - 1;
+        store8(&buf + i, 48);
+        syscall(1, 1, &buf + i, 23 - i);
+        return 0;
+    }
+    var neg = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    while (n > 0) {
+        i = i - 1;
+        store8(&buf + i, 48 + (n % 10));
+        n = n / 10;
+    }
+    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
+    syscall(1, 1, &buf + i, 23 - i);
+    return 0;
+}
+
+fn _fmt_name(f) {
+    if (f == SND_PCM_FORMAT_S8)       { return "S8"; }
+    if (f == SND_PCM_FORMAT_U8)       { return "U8"; }
+    if (f == SND_PCM_FORMAT_S16_LE)   { return "S16_LE"; }
+    if (f == SND_PCM_FORMAT_S16_BE)   { return "S16_BE"; }
+    if (f == SND_PCM_FORMAT_S24_LE)   { return "S24_LE"; }
+    if (f == SND_PCM_FORMAT_S32_LE)   { return "S32_LE"; }
+    if (f == SND_PCM_FORMAT_FLOAT_LE) { return "FLOAT_LE"; }
+    return "UNKNOWN";
+}
+
+fn _check_format(hwp, f) {
+    if (_hwp_mask_has_bit(hwp, SNDRV_PCM_HW_PARAM_FORMAT, f) == 1) {
+        _puts("    ");
+        _puts(_fmt_name(f));
+        _puts(" (");
+        _puti(f);
+        _puts(")\n");
+    }
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani caps — card ");
+    _puti(CAPS_CARD);
+    _puts(" device ");
+    _puti(CAPS_DEVICE);
+    _puts(" playback\n");
+
+    var res = vani_open_playback(CAPS_CARD, CAPS_DEVICE);
+    if (is_ok(res) == 0) {
+        _puts("open: FAIL\n");
+        return 1;
+    }
+    var d = payload(res);
+    _puts("  open: OK\n");
+
+    var hwp[608];
+    var r = audio_query_caps(vani_audio_handle(d), &hwp);
+    if (r < 0) {
+        _puts("HW_REFINE: FAIL r=");
+        _puti(r);
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    _puts("  HW_REFINE: OK\n");
+
+    var ch_slot   = SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    var rate_slot = SNDRV_PCM_HW_PARAM_RATE     - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    var bs_slot   = SNDRV_PCM_HW_PARAM_BUFFER_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    var ps_slot   = SNDRV_PCM_HW_PARAM_PERIOD_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+
+    _puts("  channels: ");
+    _puti(_hwp_interval_min(&hwp, ch_slot));
+    _puts("..");
+    _puti(_hwp_interval_max(&hwp, ch_slot));
+    _puts("\n");
+
+    _puts("  rate Hz:  ");
+    _puti(_hwp_interval_min(&hwp, rate_slot));
+    _puts("..");
+    _puti(_hwp_interval_max(&hwp, rate_slot));
+    _puts("\n");
+
+    _puts("  period:   ");
+    _puti(_hwp_interval_min(&hwp, ps_slot));
+    _puts("..");
+    _puti(_hwp_interval_max(&hwp, ps_slot));
+    _puts(" frames\n");
+
+    _puts("  buffer:   ");
+    _puti(_hwp_interval_min(&hwp, bs_slot));
+    _puts("..");
+    _puti(_hwp_interval_max(&hwp, bs_slot));
+    _puts(" frames\n");
+
+    _puts("  formats:\n");
+    _check_format(&hwp, SND_PCM_FORMAT_S8);
+    _check_format(&hwp, SND_PCM_FORMAT_U8);
+    _check_format(&hwp, SND_PCM_FORMAT_S16_LE);
+    _check_format(&hwp, SND_PCM_FORMAT_S16_BE);
+    _check_format(&hwp, SND_PCM_FORMAT_S24_LE);
+    _check_format(&hwp, SND_PCM_FORMAT_S32_LE);
+    _check_format(&hwp, SND_PCM_FORMAT_FLOAT_LE);
+
+    # Now exercise vani_format_negotiate against a few preferred
+    # formats. Confirms the higher-level API works.
+    _puts("\n  negotiating preferred 48k stereo S16_LE:\n");
+    var pref = vani_format_default();
+    var nres = vani_format_negotiate(d, pref);
+    if (is_ok(nres) == 0) {
+        _puts("    NEGOTIATE FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+    var got = payload(nres);
+    _puts("    rate=");
+    _puti(vani_format_rate(got));
+    _puts(" ch=");
+    _puti(vani_format_channels(got));
+    _puts(" fmt=");
+    _puts(_fmt_name(vani_format_alsa(got)));
+    _puts(" bits=");
+    _puti(vani_format_bit_depth(got));
+    _puts("\n");
+
+    _puts("\n  negotiating preferred 96k 8-channel S32_LE:\n");
+    var pref2 = vani_format_new(96000, 8, 32, SND_PCM_FORMAT_S32_LE);
+    var nres2 = vani_format_negotiate(d, pref2);
+    if (is_ok(nres2) == 0) {
+        _puts("    NEGOTIATE FAIL\n");
+    } else {
+        var got2 = payload(nres2);
+        _puts("    rate=");
+        _puti(vani_format_rate(got2));
+        _puts(" ch=");
+        _puti(vani_format_channels(got2));
+        _puts(" fmt=");
+        _puts(_fmt_name(vani_format_alsa(got2)));
+        _puts(" bits=");
+        _puti(vani_format_bit_depth(got2));
+        _puts("\n");
+    }
+
+    vani_close(d);
+    _puts("\nCAPS PASS\n");
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

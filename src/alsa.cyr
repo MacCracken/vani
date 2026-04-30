@@ -64,8 +64,12 @@ fn _audio_devpath(card, device, typ) {
 # ALSA ioctl constants
 # ================================================================
 
-# SNDRV_PCM_IOCTL_* numbers (from Linux UAPI sound/asound.h)
+# SNDRV_PCM_IOCTL_* numbers (from Linux UAPI sound/asound.h).
+# Encoding: dir(2) | size(14) | type(8) | nr(8). Type='A'=0x41,
+# size=608 for HW_PARAMS / HW_REFINE (same struct), nr=0x10 for
+# REFINE and 0x11 for PARAMS.
 enum AlsaIoctl {
+    SNDRV_PCM_IOCTL_HW_REFINE     = 0xC2604110;
     SNDRV_PCM_IOCTL_HW_PARAMS     = 0xC2604111;
     SNDRV_PCM_IOCTL_SW_PARAMS     = 0xC0884113;
     SNDRV_PCM_IOCTL_PREPARE       = 0x00004140;
@@ -250,6 +254,49 @@ fn _alsa_format_for_bits(bit_depth) {
     return 0 - 1;
 }
 
+# Inverse: AlsaFormat → bits-per-sample (signal width). Returns 0
+# for unknown.
+fn _alsa_bits_for_format(fmt) {
+    if (fmt == SND_PCM_FORMAT_S8)       { return 8; }
+    if (fmt == SND_PCM_FORMAT_U8)       { return 8; }
+    if (fmt == SND_PCM_FORMAT_S16_LE)   { return 16; }
+    if (fmt == SND_PCM_FORMAT_S16_BE)   { return 16; }
+    if (fmt == SND_PCM_FORMAT_S24_LE)   { return 24; }
+    if (fmt == SND_PCM_FORMAT_S32_LE)   { return 32; }
+    if (fmt == SND_PCM_FORMAT_FLOAT_LE) { return 32; }
+    return 0;
+}
+
+# ================================================================
+# HW_PARAMS struct readers — for HW_REFINE result inspection
+# ================================================================
+# After SNDRV_PCM_IOCTL_HW_REFINE the kernel narrows the masks and
+# intervals to what the device actually supports. These accessors
+# read those narrowed values back out.
+
+# Test if mask `mask_idx` has bit `bit` set. Returns 0 or 1.
+fn _hwp_mask_has_bit(hwp, mask_idx, bit) {
+    if (bit < 0)   { return 0; }
+    if (bit > 255) { return 0; }
+    var word_off = _hwp_mask_off(mask_idx) + (bit / 32) * 4;
+    var word = load32(hwp + word_off);
+    return (word >> (bit & 31)) & 1;
+}
+
+fn _hwp_interval_min(hwp, int_idx) {
+    return load32(hwp + _hwp_interval_off(int_idx) + 0);
+}
+
+fn _hwp_interval_max(hwp, int_idx) {
+    return load32(hwp + _hwp_interval_off(int_idx) + 4);
+}
+
+fn _hwp_interval_contains(hwp, int_idx, value) {
+    if (value < _hwp_interval_min(hwp, int_idx)) { return 0; }
+    if (value > _hwp_interval_max(hwp, int_idx)) { return 0; }
+    return 1;
+}
+
 # ================================================================
 # Audio device handle
 # ================================================================
@@ -361,6 +408,56 @@ fn audio_set_params(dev, rate, channels, bit_depth) {
     store64(dev + 16, channels);
     store64(dev + 24, bit_depth);
     return 0;
+}
+
+# ================================================================
+# Capability query — SNDRV_PCM_IOCTL_HW_REFINE
+# ================================================================
+# REFINE asks the kernel "given these constraints, what subset of
+# masks / intervals is actually supported?" — without applying any
+# state transition. Caller passes a 608-byte buffer, we fill it
+# with all-bits-set / full-range values, then ioctl writes back
+# the narrowed view. Returns 0 on success, negative on failure.
+#
+# Use case: `vani_format_negotiate` consumes the result to pick a
+# format the device can actually produce.
+
+fn audio_query_caps(dev, hwp) {
+    if (dev == 0) { return 0 - 1; }
+    if (hwp == 0) { return 0 - 1; }
+    _hwp_init_any(hwp);
+    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, hwp);
+}
+
+# Lower-level: ask whether a specific (rate, channels, bit_depth)
+# combination is supported. Builds the same struct as
+# `audio_set_params` but uses HW_REFINE — no state change.
+# Returns 1 if supported, 0 if not, negative on syscall failure.
+fn audio_can_set_params(dev, rate, channels, bit_depth) {
+    if (dev == 0)      { return 0 - 1; }
+    if (rate <= 0)     { return 0 - 1; }
+    if (channels <= 0) { return 0 - 1; }
+    var fmt = _alsa_format_for_bits(bit_depth);
+    if (fmt < 0) { return 0; }
+
+    var hwp[608];
+    _hwp_init_any(&hwp);
+    _hwp_mask_set_value(&hwp,
+        SNDRV_PCM_HW_PARAM_ACCESS,
+        SND_PCM_ACCESS_RW_INTERLEAVED);
+    _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
+    _hwp_mask_set_value(&hwp,
+        SNDRV_PCM_HW_PARAM_SUBFORMAT,
+        SND_PCM_SUBFORMAT_STD);
+    _hwp_interval_set_exact(&hwp,
+        SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        channels);
+    _hwp_interval_set_exact(&hwp,
+        SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        rate);
+    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, &hwp);
+    if (r < 0) { return 0; }
+    return 1;
 }
 
 # ================================================================
