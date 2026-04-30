@@ -1,0 +1,105 @@
+# @public — stable API surface
+# mixer.cyr — hardware mixer (volume/mute) via /dev/snd/controlC{N}
+#
+# Separate file descriptor from PCM. The control device exposes
+# "elements" (volume sliders, mute switches, source selectors) by
+# numeric ID. We expose volume + mute first; element listing comes
+# in v0.3.0.
+#
+# ALSA control ioctls take 200+ byte structs (snd_ctl_elem_info,
+# snd_ctl_elem_value). Filling those in pure Cyrius is mechanical
+# but verbose; this scaffold sets up the open/close lifecycle and
+# the ioctl number table, then leaves the per-call struct packing
+# for the implementation pass.
+#
+# VaniMixer struct layout (16 bytes):
+#   +0: fd     — file descriptor for /dev/snd/controlC{N}
+#   +8: card   — ALSA card number
+
+# ================================================================
+# Control device ioctl numbers
+# ================================================================
+
+enum AlsaCtl {
+    SNDRV_CTL_IOCTL_CARD_INFO   = 0x81785501;
+    SNDRV_CTL_IOCTL_ELEM_LIST   = 0xC1185510;
+    SNDRV_CTL_IOCTL_ELEM_INFO   = 0xC1105511;
+    SNDRV_CTL_IOCTL_ELEM_READ   = 0xC4C85512;
+    SNDRV_CTL_IOCTL_ELEM_WRITE  = 0xC4C85513;
+}
+
+# ================================================================
+# Path builder: /dev/snd/controlC{N}
+# ================================================================
+
+fn _vani_ctl_path(card) {
+    var p = alloc(24);
+    store8(p,    47);  # /
+    store8(p+1,  100); # d
+    store8(p+2,  101); # e
+    store8(p+3,  118); # v
+    store8(p+4,  47);  # /
+    store8(p+5,  115); # s
+    store8(p+6,  110); # n
+    store8(p+7,  100); # d
+    store8(p+8,  47);  # /
+    store8(p+9,  99);  # c
+    store8(p+10, 111); # o
+    store8(p+11, 110); # n
+    store8(p+12, 116); # t
+    store8(p+13, 114); # r
+    store8(p+14, 111); # o
+    store8(p+15, 108); # l
+    store8(p+16, 67);  # C
+    store8(p+17, 48 + (card % 10));
+    store8(p+18, 0);
+    return p;
+}
+
+# ================================================================
+# Open / close
+# ================================================================
+
+fn vani_mixer_open(card) {
+    var path = _vani_ctl_path(card);
+    var fd = syscall(2, path, 2, 0); # O_RDWR
+    if (fd < 0) { return vani_err_result(VANI_ERR_MIXER_OPEN); }
+    var m = alloc(16);
+    store64(m, fd);
+    store64(m + 8, card);
+    return vani_ok(m);
+}
+
+fn vani_mixer_close(m) {
+    if (m == 0) { return 0; }
+    var fd = load64(m);
+    syscall(3, fd);
+    return 0;
+}
+
+fn vani_mixer_fd(m)   { return load64(m); }
+fn vani_mixer_card(m) { return load64(m + 8); }
+
+# ================================================================
+# Volume / mute — placeholder API
+# ================================================================
+# The real implementations need snd_ctl_elem_id (16-byte iface +
+# device + subdevice + name + index) plus snd_ctl_elem_value
+# (variant union sized to 1024 bytes). Land those in v0.3.0 once
+# the descriptor layout is locked in tests against real hardware.
+
+fn vani_mixer_set_volume(m, elem_name, percent) {
+    if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (percent < 0)    { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (percent > 100)  { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+        "mixer ELEM_WRITE struct packing pending — see roadmap v0.3.0");
+}
+
+fn vani_mixer_set_mute(m, elem_name, muted) {
+    if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+    return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+        "mixer ELEM_WRITE struct packing pending — see roadmap v0.3.0");
+}

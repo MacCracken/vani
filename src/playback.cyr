@@ -1,0 +1,65 @@
+# @public — stable API surface
+# playback.cyr — PCM write path with XRUN recovery
+#
+# audio_write returns negative on error; the meaningful negative
+# values map to ALSA states (XRUN, suspended, disconnected). The
+# stdlib layer surfaces the raw return; vani classifies it and
+# auto-recovers when it can.
+#
+# Recovery policy:
+#   underrun (XRUN)  → re-prepare, retry once. Increment xrun_count.
+#   suspended        → caller's problem (resume needs explicit consent)
+#   anything else    → propagate as VaniErr
+
+# ================================================================
+# Single-shot write
+# ================================================================
+# vani_play writes `frames` interleaved frames from `buf`. Returns a
+# Result of frames-actually-written (may be < frames on partial write).
+
+fn vani_play(d, buf, frames) {
+    if (d == 0)         { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (buf == 0)       { return vani_err_result(VANI_ERR_WRITE); }
+    if (frames <= 0)    { return vani_ok(0); }
+    var h = vani_audio_handle(d);
+    var written = audio_write(h, buf, frames);
+    if (written >= 0) { return vani_ok(written); }
+    # Negative return: try to recover from XRUN once.
+    var st = audio_get_state(h);
+    if (st == SND_PCM_STATE_XRUN) {
+        vani_xrun_inc(d);
+        var pr = audio_prepare(h);
+        if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
+        written = audio_write(h, buf, frames);
+        if (written >= 0) { return vani_ok(written); }
+        return vani_err_result(VANI_ERR_UNDERRUN);
+    }
+    if (st == SND_PCM_STATE_SUSPENDED) {
+        return vani_err_result(VANI_ERR_SUSPENDED);
+    }
+    return vani_err_result(VANI_ERR_WRITE);
+}
+
+# ================================================================
+# Drain ring buffer to device
+# ================================================================
+# Pull as many full frames as the ring holds and write them in one
+# shot. Returns Result(frames_written). Caller loops until
+# vani_ring_used(rb) drops below one frame's worth of bytes.
+
+fn vani_play_from_ring(d, rb) {
+    if (d == 0)  { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (rb == 0) { return vani_err_result(VANI_ERR_WRITE); }
+    var fmt = vani_format_get(d);
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var bpf = vani_bytes_per_frame(fmt);
+    if (bpf == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var avail_bytes = vani_ring_used(rb);
+    var avail_frames = avail_bytes / bpf;
+    if (avail_frames == 0) { return vani_ok(0); }
+    # Drain into a contiguous scratch buffer — audio_write needs one.
+    var n_bytes = avail_frames * bpf;
+    var scratch = alloc(n_bytes);
+    vani_ring_read(rb, scratch, n_bytes);
+    return vani_play(d, scratch, avail_frames);
+}

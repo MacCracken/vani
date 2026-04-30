@@ -1,0 +1,61 @@
+# @public — stable API surface
+# capture.cyr — PCM read path with overrun recovery
+#
+# Mirrors playback.cyr with read instead of write. ALSA reports
+# overruns as XRUN state on the capture stream — same recovery path
+# applies (re-prepare, retry once).
+
+# ================================================================
+# Single-shot read
+# ================================================================
+# Reads up to `frames` interleaved frames into `buf`. Returns
+# Result(frames_actually_read).
+
+fn vani_record(d, buf, frames) {
+    if (d == 0)        { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (buf == 0)      { return vani_err_result(VANI_ERR_READ); }
+    if (frames <= 0)   { return vani_ok(0); }
+    var h = vani_audio_handle(d);
+    var got = audio_read(h, buf, frames);
+    if (got >= 0) { return vani_ok(got); }
+    var st = audio_get_state(h);
+    if (st == SND_PCM_STATE_XRUN) {
+        vani_xrun_inc(d);
+        var pr = audio_prepare(h);
+        if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
+        got = audio_read(h, buf, frames);
+        if (got >= 0) { return vani_ok(got); }
+        return vani_err_result(VANI_ERR_OVERRUN);
+    }
+    if (st == SND_PCM_STATE_SUSPENDED) {
+        return vani_err_result(VANI_ERR_SUSPENDED);
+    }
+    return vani_err_result(VANI_ERR_READ);
+}
+
+# ================================================================
+# Capture into ring buffer
+# ================================================================
+# Reads up to `frames` and pushes the bytes into rb. Returns
+# Result(frames_actually_pushed) — may be short if the ring fills.
+
+fn vani_record_to_ring(d, rb, frames) {
+    if (d == 0)  { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (rb == 0) { return vani_err_result(VANI_ERR_READ); }
+    var fmt = vani_format_get(d);
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var bpf = vani_bytes_per_frame(fmt);
+    if (bpf == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    # Cap by what the ring can absorb — short reads beat overflow.
+    var ring_cap_frames = vani_ring_free(rb) / bpf;
+    if (ring_cap_frames < frames) { frames = ring_cap_frames; }
+    if (frames <= 0) { return vani_err_result(VANI_ERR_BUFFER_FULL); }
+    var n_bytes = frames * bpf;
+    var scratch = alloc(n_bytes);
+    var res = vani_record(d, scratch, frames);
+    if (is_ok(res) == 0) { return res; }
+    var got_frames = payload(res);
+    var got_bytes = got_frames * bpf;
+    vani_ring_write(rb, scratch, got_bytes);
+    return vani_ok(got_frames);
+}

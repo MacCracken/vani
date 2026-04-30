@@ -1,0 +1,141 @@
+# @public — stable API surface
+# device.cyr — VaniDevice handle wrapping stdlib audio.cyr
+#
+# audio.cyr (in cyrius stdlib) gives us the raw fd + ioctl primitives
+# but stops at "store the params on the handle struct". VaniDevice
+# adds: a typed open path that returns a Result, format-state
+# tracking, an XRUN counter, and a yukti-descriptor adapter so
+# discovery (yukti's job) feeds straight into open (vani's job).
+#
+# VaniDevice struct layout (48 bytes):
+#   +0:  audio_h   — pointer to stdlib audio handle (32 bytes from audio.cyr)
+#   +8:  card      — ALSA card number
+#   +16: device    — ALSA device number
+#   +24: format    — VaniFormat ptr (or 0 until configured)
+#   +32: direction — 0 playback, 1 capture
+#   +40: xrun_count — observed underruns/overruns since open
+
+enum VaniDirection {
+    VANI_PLAYBACK = 0;
+    VANI_CAPTURE  = 1;
+}
+
+# ================================================================
+# Open / close
+# ================================================================
+
+fn _vani_device_wrap(audio_h, card, device, direction) {
+    if (audio_h == 0) {
+        return vani_err_result(VANI_ERR_DEVICE_OPEN);
+    }
+    var d = alloc(48);
+    store64(d, audio_h);
+    store64(d + 8, card);
+    store64(d + 16, device);
+    store64(d + 24, 0);
+    store64(d + 32, direction);
+    store64(d + 40, 0);
+    return vani_ok(d);
+}
+
+fn vani_open_playback(card, device) {
+    var h = audio_open_playback(card, device);
+    return _vani_device_wrap(h, card, device, VANI_PLAYBACK);
+}
+
+fn vani_open_capture(card, device) {
+    var h = audio_open_capture(card, device);
+    return _vani_device_wrap(h, card, device, VANI_CAPTURE);
+}
+
+# Close releases the underlying audio handle and the VaniDevice
+# wrapper. Always returns 0 — close is best-effort.
+fn vani_close(d) {
+    if (d == 0) { return 0; }
+    var h = load64(d);
+    if (h != 0) { audio_close(h); }
+    return 0;
+}
+
+# ================================================================
+# Accessors
+# ================================================================
+
+fn vani_audio_handle(d) { return load64(d); }
+fn vani_card(d)         { return load64(d + 8); }
+fn vani_device_id(d)    { return load64(d + 16); }
+fn vani_format_get(d)   { return load64(d + 24); }
+fn vani_direction(d)    { return load64(d + 32); }
+fn vani_xrun_count(d)   { return load64(d + 40); }
+
+fn vani_xrun_inc(d) {
+    store64(d + 40, vani_xrun_count(d) + 1);
+    return 0;
+}
+
+# ================================================================
+# Configure — push a VaniFormat through audio_set_params
+# ================================================================
+# audio.cyr's set_params is the simplified path (no full HW_PARAMS
+# struct yet); when stdlib gains the full negotiation ioctl this
+# function picks it up without API changes.
+
+fn vani_configure(d, fmt) {
+    if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
+    if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
+    var h = vani_audio_handle(d);
+    var r = audio_set_params(h,
+        vani_format_rate(fmt),
+        vani_format_channels(fmt),
+        vani_format_bit_depth(fmt));
+    if (r < 0) {
+        return vani_err_result(VANI_ERR_HW_PARAMS);
+    }
+    store64(d + 24, fmt);
+    return vani_ok(d);
+}
+
+fn vani_prepare(d) {
+    var r = audio_prepare(vani_audio_handle(d));
+    if (r < 0) { return vani_err_result(VANI_ERR_PREPARE); }
+    return vani_ok(d);
+}
+
+fn vani_start(d) {
+    var r = audio_start(vani_audio_handle(d));
+    if (r < 0) { return vani_err_result(VANI_ERR_START); }
+    return vani_ok(d);
+}
+
+fn vani_drain(d) {
+    return audio_drain(vani_audio_handle(d));
+}
+
+fn vani_drop(d) {
+    return audio_drop(vani_audio_handle(d));
+}
+
+fn vani_state(d) {
+    return audio_get_state(vani_audio_handle(d));
+}
+
+# ================================================================
+# yukti integration
+# ================================================================
+# yukti returns descriptors for every audio device on the system.
+# vani_open_yukti accepts one such descriptor and routes it to the
+# right audio_open_* path. The descriptor layout is yukti's contract;
+# we treat it as opaque and only ask for card / device / direction.
+#
+# Until yukti.cyr exposes typed accessors for audio descriptors,
+# callers can pass the (card, device) directly via vani_open_*.
+# This wrapper is a placeholder for the typed adapter — fill in
+# once yukti's audio descriptor API stabilizes.
+
+fn vani_open_yukti(yukti_desc, direction) {
+    if (yukti_desc == 0) {
+        return vani_err_result(VANI_ERR_YUKTI_DESCRIPTOR);
+    }
+    return vani_err_result_msg(VANI_ERR_YUKTI_DESCRIPTOR,
+        "yukti audio descriptor adapter pending — see roadmap v0.3.0");
+}

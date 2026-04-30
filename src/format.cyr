@@ -1,0 +1,122 @@
+# @public — stable API surface
+# format.cyr — sample format helpers + negotiation
+#
+# Re-uses AlsaFormat constants from stdlib audio.cyr. Adds the
+# higher-level "what does the source PCM look like" queries that the
+# raw ioctl layer doesn't speak.
+#
+# A vani format is fully specified by four numbers:
+#   rate      — Hz (44100, 48000, 96000, 192000, ...)
+#   channels  — 1 mono, 2 stereo, 6 5.1, 8 7.1, ...
+#   bit_depth — 8 / 16 / 24 / 32
+#   alsa_fmt  — one of AlsaFormat (encodes signed-ness + endian)
+#
+# We pack these into a 32-byte VaniFormat struct so callers can pass
+# one pointer instead of four args.
+
+# ================================================================
+# Common rates (Hz)
+# ================================================================
+
+enum VaniRate {
+    VANI_RATE_8K   = 8000;
+    VANI_RATE_16K  = 16000;
+    VANI_RATE_22K  = 22050;
+    VANI_RATE_32K  = 32000;
+    VANI_RATE_44K  = 44100;
+    VANI_RATE_48K  = 48000;
+    VANI_RATE_88K  = 88200;
+    VANI_RATE_96K  = 96000;
+    VANI_RATE_176K = 176400;
+    VANI_RATE_192K = 192000;
+}
+
+# ================================================================
+# VaniFormat struct (32 bytes)
+#   +0:  rate       — sample rate in Hz
+#   +8:  channels   — channel count
+#   +16: bit_depth  — bits per sample (signal width — not always = 8 *
+#                     bytes_per_sample, e.g. S24_LE = 24 bits in 32-bit slot)
+#   +24: alsa_fmt   — AlsaFormat enum value
+# ================================================================
+
+fn vani_format_new(rate, channels, bit_depth, alsa_fmt) {
+    var f = alloc(32);
+    store64(f, rate);
+    store64(f + 8, channels);
+    store64(f + 16, bit_depth);
+    store64(f + 24, alsa_fmt);
+    return f;
+}
+
+# Sensible defaults: 48 kHz stereo S16_LE — the universal baseline.
+fn vani_format_default() {
+    return vani_format_new(VANI_RATE_48K, 2, 16, SND_PCM_FORMAT_S16_LE);
+}
+
+# CD-quality: 44.1 kHz stereo S16_LE.
+fn vani_format_cd() {
+    return vani_format_new(VANI_RATE_44K, 2, 16, SND_PCM_FORMAT_S16_LE);
+}
+
+fn vani_format_rate(f)      { return load64(f); }
+fn vani_format_channels(f)  { return load64(f + 8); }
+fn vani_format_bit_depth(f) { return load64(f + 16); }
+fn vani_format_alsa(f)      { return load64(f + 24); }
+
+# ================================================================
+# Frame / byte math
+# ================================================================
+# A "frame" is one sample across all channels at one point in time.
+# bytes_per_frame = channels * bytes_per_sample. S24_LE is the
+# awkward one: 24 bits of signal in 32 bits of storage.
+
+fn vani_bytes_per_sample(alsa_fmt) {
+    if (alsa_fmt == SND_PCM_FORMAT_S8)       { return 1; }
+    if (alsa_fmt == SND_PCM_FORMAT_U8)       { return 1; }
+    if (alsa_fmt == SND_PCM_FORMAT_S16_LE)   { return 2; }
+    if (alsa_fmt == SND_PCM_FORMAT_S16_BE)   { return 2; }
+    if (alsa_fmt == SND_PCM_FORMAT_S24_LE)   { return 4; }
+    if (alsa_fmt == SND_PCM_FORMAT_S32_LE)   { return 4; }
+    if (alsa_fmt == SND_PCM_FORMAT_FLOAT_LE) { return 4; }
+    return 0;
+}
+
+fn vani_bytes_per_frame(f) {
+    var bps = vani_bytes_per_sample(vani_format_alsa(f));
+    return vani_format_channels(f) * bps;
+}
+
+# Frames-to-bytes / bytes-to-frames at the configured format.
+fn vani_frames_to_bytes(f, frames) {
+    return frames * vani_bytes_per_frame(f);
+}
+
+fn vani_bytes_to_frames(f, bytes) {
+    var bpf = vani_bytes_per_frame(f);
+    if (bpf == 0) { return 0; }
+    return bytes / bpf;
+}
+
+# Latency in milliseconds → frame count at this format's rate.
+fn vani_ms_to_frames(f, ms) {
+    return (vani_format_rate(f) * ms) / 1000;
+}
+
+# ================================================================
+# Format selection
+# ================================================================
+# Pick an AlsaFormat for a given (bit_depth, signed). Defaults LE.
+# Callers that need explicit endian should use the AlsaFormat enum
+# directly.
+
+fn vani_alsa_for(bit_depth, signed) {
+    if (bit_depth == 8) {
+        if (signed == 1) { return SND_PCM_FORMAT_S8; }
+        return SND_PCM_FORMAT_U8;
+    }
+    if (bit_depth == 16) { return SND_PCM_FORMAT_S16_LE; }
+    if (bit_depth == 24) { return SND_PCM_FORMAT_S24_LE; }
+    if (bit_depth == 32) { return SND_PCM_FORMAT_S32_LE; }
+    return 0 - 1;
+}

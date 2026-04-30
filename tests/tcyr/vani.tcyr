@@ -1,0 +1,241 @@
+# tests/tcyr/vani.tcyr — CPU-only test suite for vani
+# Pure-data assertions — no real audio device required. Hardware
+# integration tests (real PCM open/write) live under
+# tests/integration/ and are gated on a sound card being present.
+#
+# Sections: error codes, format math, ring buffer.
+
+include "src/lib.cyr"
+include "lib/assert.cyr"
+
+# ================================================================
+# error.cyr
+# ================================================================
+
+fn test_error_codes_unique() {
+    assert(VANI_ERR_NONE         != VANI_ERR_DEVICE_OPEN, "none != device_open");
+    assert(VANI_ERR_DEVICE_OPEN  != VANI_ERR_DEVICE_BUSY, "device_open != busy");
+    assert(VANI_ERR_HW_PARAMS    != VANI_ERR_SW_PARAMS,   "hw != sw params");
+    assert(VANI_ERR_UNDERRUN     != VANI_ERR_OVERRUN,     "under != over");
+    assert(VANI_ERR_BUFFER_FULL  != VANI_ERR_BUFFER_EMPTY, "full != empty");
+    return 0;
+}
+
+fn test_vani_err_new_stores_fields() {
+    var e = vani_err_new(VANI_ERR_WRITE, "short write");
+    assert_eq(vani_err_code(e), VANI_ERR_WRITE, "code stored");
+    var d = vani_err_detail(e);
+    assert(d != 0, "detail stored");
+    assert_eq(strlen(d), 11, "detail length");
+    return 0;
+}
+
+fn test_vani_err_no_detail() {
+    var e = vani_err(VANI_ERR_DEVICE_BUSY);
+    assert_eq(vani_err_code(e), VANI_ERR_DEVICE_BUSY, "code stored");
+    assert_eq(vani_err_detail(e), 0, "detail null");
+    return 0;
+}
+
+fn test_vani_err_recoverable() {
+    assert_eq(vani_err_is_recoverable(VANI_ERR_UNDERRUN),  1, "underrun recoverable");
+    assert_eq(vani_err_is_recoverable(VANI_ERR_OVERRUN),   1, "overrun recoverable");
+    assert_eq(vani_err_is_recoverable(VANI_ERR_SUSPENDED), 1, "suspended recoverable");
+    assert_eq(vani_err_is_recoverable(VANI_ERR_DEVICE_OPEN), 0, "open is fatal");
+    assert_eq(vani_err_is_recoverable(VANI_ERR_HW_PARAMS),   0, "hw_params is fatal");
+    return 0;
+}
+
+fn test_vani_err_name_lookup() {
+    assert_eq(strlen(vani_err_name(VANI_ERR_NONE)),       4,  "none");
+    assert_eq(strlen(vani_err_name(VANI_ERR_UNDERRUN)),   8,  "underrun");
+    assert_eq(strlen(vani_err_name(VANI_ERR_DEVICE_BUSY)), 11, "device busy");
+    return 0;
+}
+
+# ================================================================
+# format.cyr
+# ================================================================
+
+fn test_format_default_is_48k_stereo_s16() {
+    var f = vani_format_default();
+    assert_eq(vani_format_rate(f),      VANI_RATE_48K,         "rate 48k");
+    assert_eq(vani_format_channels(f),  2,                     "stereo");
+    assert_eq(vani_format_bit_depth(f), 16,                    "16-bit");
+    assert_eq(vani_format_alsa(f),      SND_PCM_FORMAT_S16_LE, "S16_LE");
+    return 0;
+}
+
+fn test_format_cd_is_44k_stereo_s16() {
+    var f = vani_format_cd();
+    assert_eq(vani_format_rate(f),     VANI_RATE_44K, "rate 44.1k");
+    assert_eq(vani_format_channels(f), 2,             "stereo");
+    return 0;
+}
+
+fn test_bytes_per_sample() {
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_S8),       1, "s8");
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_U8),       1, "u8");
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_S16_LE),   2, "s16");
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_S24_LE),   4, "s24 in 32");
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_S32_LE),   4, "s32");
+    assert_eq(vani_bytes_per_sample(SND_PCM_FORMAT_FLOAT_LE), 4, "float");
+    return 0;
+}
+
+fn test_bytes_per_frame_stereo_s16() {
+    var f = vani_format_default();
+    assert_eq(vani_bytes_per_frame(f), 4, "2ch * 2bytes = 4");
+    return 0;
+}
+
+fn test_frames_to_bytes_roundtrip() {
+    var f = vani_format_default();
+    assert_eq(vani_frames_to_bytes(f, 1000), 4000, "1000 frames");
+    assert_eq(vani_bytes_to_frames(f, 4000), 1000, "4000 bytes");
+    return 0;
+}
+
+fn test_ms_to_frames_at_48k() {
+    var f = vani_format_default();
+    assert_eq(vani_ms_to_frames(f, 10),   480,  "10ms = 480 frames");
+    assert_eq(vani_ms_to_frames(f, 1000), 48000, "1s = 48000 frames");
+    return 0;
+}
+
+fn test_alsa_for_picks_signed_and_endian() {
+    assert_eq(vani_alsa_for(8,  1), SND_PCM_FORMAT_S8,     "s8 signed");
+    assert_eq(vani_alsa_for(8,  0), SND_PCM_FORMAT_U8,     "u8 unsigned");
+    assert_eq(vani_alsa_for(16, 1), SND_PCM_FORMAT_S16_LE, "s16 le");
+    assert_eq(vani_alsa_for(24, 1), SND_PCM_FORMAT_S24_LE, "s24 le");
+    assert_eq(vani_alsa_for(32, 1), SND_PCM_FORMAT_S32_LE, "s32 le");
+    return 0;
+}
+
+# ================================================================
+# buffer.cyr
+# ================================================================
+
+fn test_ring_capacity_rounds_to_pow2() {
+    var rb = vani_ring_new(1000);
+    assert_eq(vani_ring_size(rb), 1024, "1000 → 1024");
+    var rb2 = vani_ring_new(4096);
+    assert_eq(vani_ring_size(rb2), 4096, "4096 stays 4096");
+    return 0;
+}
+
+fn test_ring_starts_empty() {
+    var rb = vani_ring_new(64);
+    assert_eq(vani_ring_used(rb),     0,  "empty used");
+    assert_eq(vani_ring_free(rb),     64, "full free");
+    assert_eq(vani_ring_is_empty(rb), 1,  "is_empty");
+    assert_eq(vani_ring_is_full(rb),  0,  "not full");
+    return 0;
+}
+
+fn test_ring_write_then_read_roundtrip() {
+    var rb = vani_ring_new(64);
+    var src = alloc(8);
+    store8(src,   65);
+    store8(src+1, 66);
+    store8(src+2, 67);
+    store8(src+3, 68);
+    var n = vani_ring_write(rb, src, 4);
+    assert_eq(n, 4, "wrote 4");
+    assert_eq(vani_ring_used(rb), 4, "used 4");
+    var dst = alloc(8);
+    var m = vani_ring_read(rb, dst, 4);
+    assert_eq(m, 4, "read 4");
+    assert_eq(load8(dst),   65, "A");
+    assert_eq(load8(dst+1), 66, "B");
+    assert_eq(load8(dst+2), 67, "C");
+    assert_eq(load8(dst+3), 68, "D");
+    assert_eq(vani_ring_used(rb), 0, "empty after drain");
+    return 0;
+}
+
+fn test_ring_write_short_when_full() {
+    var rb = vani_ring_new(8);
+    var src = alloc(16);
+    var i = 0;
+    while (i < 16) { store8(src + i, i); i = i + 1; }
+    var n = vani_ring_write(rb, src, 16);
+    assert_eq(n, 8, "capped at size");
+    assert_eq(vani_ring_is_full(rb), 1, "now full");
+    return 0;
+}
+
+fn test_ring_wraps_around_mask() {
+    var rb = vani_ring_new(8);
+    var src = alloc(8);
+    var i = 0;
+    while (i < 8) { store8(src + i, i + 1); i = i + 1; }
+    # Fill, drain 6, fill 6 more — second fill wraps the write index.
+    vani_ring_write(rb, src, 8);
+    var dst = alloc(8);
+    vani_ring_read(rb, dst, 6);
+    vani_ring_write(rb, src, 6);
+    assert_eq(vani_ring_used(rb), 8, "back to full");
+    return 0;
+}
+
+fn test_ring_reset_clears_positions() {
+    var rb = vani_ring_new(16);
+    var src = alloc(8);
+    vani_ring_write(rb, src, 5);
+    vani_ring_reset(rb);
+    assert_eq(vani_ring_wpos(rb), 0, "wpos reset");
+    assert_eq(vani_ring_rpos(rb), 0, "rpos reset");
+    assert_eq(vani_ring_is_empty(rb), 1, "empty after reset");
+    return 0;
+}
+
+# ================================================================
+# device.cyr — pure-data accessors only (no real fd)
+# ================================================================
+
+fn test_direction_constants() {
+    assert_eq(VANI_PLAYBACK, 0, "playback = 0");
+    assert_eq(VANI_CAPTURE,  1, "capture = 1");
+    return 0;
+}
+
+# ================================================================
+# Test runner
+# ================================================================
+
+fn main() {
+    alloc_init();
+    test_group("error");
+    test_error_codes_unique();
+    test_vani_err_new_stores_fields();
+    test_vani_err_no_detail();
+    test_vani_err_recoverable();
+    test_vani_err_name_lookup();
+
+    test_group("format");
+    test_format_default_is_48k_stereo_s16();
+    test_format_cd_is_44k_stereo_s16();
+    test_bytes_per_sample();
+    test_bytes_per_frame_stereo_s16();
+    test_frames_to_bytes_roundtrip();
+    test_ms_to_frames_at_48k();
+    test_alsa_for_picks_signed_and_endian();
+
+    test_group("buffer");
+    test_ring_capacity_rounds_to_pow2();
+    test_ring_starts_empty();
+    test_ring_write_then_read_roundtrip();
+    test_ring_write_short_when_full();
+    test_ring_wraps_around_mask();
+    test_ring_reset_clears_positions();
+
+    test_group("device");
+    test_direction_constants();
+
+    assert_summary();
+    return 0;
+}
+
+var ec = main();
+syscall(60, ec);

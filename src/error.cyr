@@ -1,0 +1,169 @@
+# @public — stable API surface
+# error.cyr — VaniErr codes + Result helpers
+#
+# Wraps tagged.cyr Result pattern: Ok(value) / Err(VaniErr ptr).
+# Consumers either unwrap with vani_result_unwrap or branch on
+# is_ok / payload directly.
+#
+# VaniErr struct layout (16 bytes):
+#   +0:  code    — VaniErrCode constant
+#   +8:  detail  — pointer to detail cstr (or 0)
+
+# ================================================================
+# Error codes
+# ================================================================
+
+enum VaniErrCode {
+    VANI_ERR_NONE                = 0;
+    VANI_ERR_DEVICE_OPEN         = 1;
+    VANI_ERR_DEVICE_BUSY         = 2;
+    VANI_ERR_DEVICE_INVALID      = 3;
+    VANI_ERR_HW_PARAMS           = 4;
+    VANI_ERR_SW_PARAMS           = 5;
+    VANI_ERR_FORMAT_UNSUPPORTED  = 6;
+    VANI_ERR_RATE_UNSUPPORTED    = 7;
+    VANI_ERR_CHANNELS_UNSUPPORTED = 8;
+    VANI_ERR_PREPARE             = 9;
+    VANI_ERR_START               = 10;
+    VANI_ERR_WRITE               = 11;
+    VANI_ERR_READ                = 12;
+    VANI_ERR_UNDERRUN            = 13;
+    VANI_ERR_OVERRUN             = 14;
+    VANI_ERR_SUSPENDED           = 15;
+    VANI_ERR_DISCONNECTED        = 16;
+    VANI_ERR_MIXER_OPEN          = 17;
+    VANI_ERR_MIXER_ELEM          = 18;
+    VANI_ERR_BUFFER_FULL         = 19;
+    VANI_ERR_BUFFER_EMPTY        = 20;
+    VANI_ERR_BUFFER_SIZE         = 21;
+    VANI_ERR_YUKTI_DESCRIPTOR    = 22;
+    VANI_ERR_OTHER               = 99;
+}
+
+# ================================================================
+# VaniErr struct
+# ================================================================
+
+fn vani_err_new(code, detail) {
+    var e = alloc(16);
+    store64(e, code);
+    store64(e + 8, detail);
+    return e;
+}
+
+fn vani_err(code) {
+    return vani_err_new(code, 0);
+}
+
+fn vani_err_code(e)   { return load64(e); }
+fn vani_err_detail(e) { return load64(e + 8); }
+
+# ================================================================
+# Sakshi observability wiring (mirrors mabda's pattern)
+# ================================================================
+# Default: silent. Consumers opt in via vani_observability_enable()
+# OR by configuring sakshi directly.
+
+var _vani_obs_enabled = 0;
+
+fn vani_observability_enable()     { _vani_obs_enabled = 1; return 0; }
+fn vani_observability_disable()    { _vani_obs_enabled = 0; return 0; }
+fn vani_observability_is_enabled() { return _vani_obs_enabled; }
+
+fn _sk_emit_err(code) {
+    if (_vani_obs_enabled == 0) { return 0; }
+    var name = vani_err_name(code);
+    var nlen = strlen(name);
+    if (vani_err_is_recoverable(code) == 1) {
+        sakshi_warn(name, nlen);
+    } else {
+        sakshi_error(name, nlen);
+    }
+    return 0;
+}
+
+# ================================================================
+# Result helpers — wraps tagged.cyr
+# ================================================================
+
+fn vani_ok(value) {
+    return Ok(value);
+}
+
+fn vani_err_result(code) {
+    _sk_emit_err(code);
+    return Err(vani_err(code));
+}
+
+fn vani_err_result_msg(code, msg) {
+    _sk_emit_err(code);
+    return Err(vani_err_new(code, msg));
+}
+
+fn vani_result_unwrap(res) {
+    if (is_ok(res) == 1) { return payload(res); }
+    var e = payload(res);
+    var code = vani_err_code(e);
+    syscall(1, 2, "vani error: ", 12);
+    vani_err_print_name(code);
+    var detail = vani_err_detail(e);
+    if (detail != 0) {
+        syscall(1, 2, ": ", 2);
+        syscall(1, 2, detail, strlen(detail));
+    }
+    syscall(1, 2, "\n", 1);
+    syscall(60, 1);
+    return 0;
+}
+
+# ================================================================
+# Recoverability
+# ================================================================
+# XRUN states (underrun/overrun) are recoverable via re-prepare.
+# Suspended is recoverable via resume. Everything else is fatal to
+# the current device handle.
+
+fn vani_err_is_recoverable(code) {
+    if (code == VANI_ERR_UNDERRUN)  { return 1; }
+    if (code == VANI_ERR_OVERRUN)   { return 1; }
+    if (code == VANI_ERR_SUSPENDED) { return 1; }
+    return 0;
+}
+
+# ================================================================
+# Names
+# ================================================================
+
+fn vani_err_name(code) {
+    if (code == VANI_ERR_NONE)                 { return "none"; }
+    if (code == VANI_ERR_DEVICE_OPEN)          { return "device open failed"; }
+    if (code == VANI_ERR_DEVICE_BUSY)          { return "device busy"; }
+    if (code == VANI_ERR_DEVICE_INVALID)       { return "device invalid"; }
+    if (code == VANI_ERR_HW_PARAMS)            { return "hw params failed"; }
+    if (code == VANI_ERR_SW_PARAMS)            { return "sw params failed"; }
+    if (code == VANI_ERR_FORMAT_UNSUPPORTED)   { return "format unsupported"; }
+    if (code == VANI_ERR_RATE_UNSUPPORTED)     { return "rate unsupported"; }
+    if (code == VANI_ERR_CHANNELS_UNSUPPORTED) { return "channels unsupported"; }
+    if (code == VANI_ERR_PREPARE)              { return "prepare failed"; }
+    if (code == VANI_ERR_START)                { return "start failed"; }
+    if (code == VANI_ERR_WRITE)                { return "write failed"; }
+    if (code == VANI_ERR_READ)                 { return "read failed"; }
+    if (code == VANI_ERR_UNDERRUN)             { return "underrun"; }
+    if (code == VANI_ERR_OVERRUN)              { return "overrun"; }
+    if (code == VANI_ERR_SUSPENDED)            { return "suspended"; }
+    if (code == VANI_ERR_DISCONNECTED)         { return "disconnected"; }
+    if (code == VANI_ERR_MIXER_OPEN)           { return "mixer open failed"; }
+    if (code == VANI_ERR_MIXER_ELEM)           { return "mixer element error"; }
+    if (code == VANI_ERR_BUFFER_FULL)          { return "ring buffer full"; }
+    if (code == VANI_ERR_BUFFER_EMPTY)         { return "ring buffer empty"; }
+    if (code == VANI_ERR_BUFFER_SIZE)          { return "ring buffer size invalid"; }
+    if (code == VANI_ERR_YUKTI_DESCRIPTOR)     { return "yukti descriptor invalid"; }
+    if (code == VANI_ERR_OTHER)                { return "other error"; }
+    return "unknown error";
+}
+
+fn vani_err_print_name(code) {
+    var name = vani_err_name(code);
+    syscall(1, 2, name, strlen(name));
+    return 0;
+}

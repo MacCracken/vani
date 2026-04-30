@@ -1,0 +1,22 @@
+# programs/smoke.cyr — compile-time proof that src/lib.cyr links clean.
+#
+# vani is a library — there is no CLI binary. This program exists so
+# `cyrius build programs/smoke.cyr build/vani_smoke` can verify the
+# full include chain parses and links without error. The emitted
+# binary writes a one-line banner and exits 0.
+#
+# Hardware integration tests (open a real ALSA device, play a tone)
+# live in tests/integration/ and are gated on a real audio card
+# being present — not part of the smoke gate.
+
+include "src/lib.cyr"
+
+fn main() {
+    alloc_init();
+    var banner = "vani smoke: lib.cyr linked clean\n";
+    syscall(1, 1, banner, strlen(banner));
+    return 0;
+}
+
+var exit_code = main();
+syscall(60, exit_code);

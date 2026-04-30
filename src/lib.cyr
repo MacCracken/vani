@@ -1,0 +1,46 @@
+# @public — vani library include chain
+# vani — audio device I/O for the Cyrius ecosystem
+#
+# Provides: typed VaniErr error model, sample format helpers, ring
+# buffer for jitter resilience, VaniDevice handle (wraps stdlib
+# audio.cyr), playback / capture loops with XRUN recovery, mixer
+# control device.
+#
+# Stdlib includes live ONLY in this file — domain modules are flat,
+# which is what lets `cyrius distlib` (strip-include concatenation)
+# produce a compile-clean `dist/vani.cyr`.
+
+# ================================================================
+# Standard library
+# ================================================================
+include "lib/syscalls.cyr"
+include "lib/string.cyr"
+include "lib/alloc.cyr"
+include "lib/str.cyr"
+include "lib/fmt.cyr"
+include "lib/vec.cyr"
+include "lib/io.cyr"
+include "lib/args.cyr"
+include "lib/hashmap.cyr"
+include "lib/tagged.cyr"
+include "lib/fnptr.cyr"
+include "lib/yukti.cyr"
+include "lib/sakshi.cyr"
+
+# ================================================================
+# Domain modules — order matches [lib].modules in cyrius.cyml
+# ================================================================
+# alsa is the raw ALSA ioctl layer — vani owns this end-to-end
+# (replaces cyrius/lib/audio.cyr; that path retires at cyrius 5.8.0).
+# error / format / buffer are pure data foundations.
+# device wraps alsa + format + error.
+# playback / capture sit on device + buffer.
+# mixer is independent (control-device ioctls, not PCM).
+include "src/alsa.cyr"
+include "src/error.cyr"
+include "src/format.cyr"
+include "src/buffer.cyr"
+include "src/device.cyr"
+include "src/playback.cyr"
+include "src/capture.cyr"
+include "src/mixer.cyr"
