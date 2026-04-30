@@ -21,16 +21,29 @@
 # ================================================================
 # Allocation
 # ================================================================
+# Hard cap at 1 GiB. Audit LOW-1 (2026-04-30): unbounded
+# `_next_pow2` could loop and overflow on a malicious / buggy
+# capacity request near i64 max. 1 GiB is more than 100×
+# the largest realistic audio ring (24-channel 192 kHz f32 ≈
+# 18 MB/s; 1 GiB holds ~57 s, far beyond any sane latency budget).
+
+enum BufferBounds {
+    VANI_RING_MAX_BYTES = 1073741824;  # 1 GiB
+}
 
 fn _next_pow2(n) {
+    if (n <= 0)                   { return 0; }
+    if (n > VANI_RING_MAX_BYTES)  { return 0; }
     var p = 1;
     while (p < n) { p = p * 2; }
     return p;
 }
 
 fn vani_ring_new(capacity) {
-    if (capacity <= 0) { return 0; }
+    if (capacity <= 0)                  { return 0; }
+    if (capacity > VANI_RING_MAX_BYTES) { return 0; }
     var sz = _next_pow2(capacity);
+    if (sz == 0) { return 0; }
     var rb = alloc(40);
     store64(rb, alloc(sz));
     store64(rb + 8, sz);

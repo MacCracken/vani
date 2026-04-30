@@ -31,8 +31,14 @@ enum AlsaCtl {
 # ================================================================
 # Path builder: /dev/snd/controlC{N}
 # ================================================================
+# Card numbers up to 99 are encoded as 1-2 decimal digits;
+# anything else returns 0 so the open() that follows fails
+# cleanly. Audit MED-1 (2026-04-30): the prior `card % 10`
+# encoding silently routed card 10 to controlC0.
 
 fn _vani_ctl_path(card) {
+    if (card < 0)  { return 0; }
+    if (card > 99) { return 0; }
     var p = alloc(24);
     store8(p,    47);  # /
     store8(p+1,  100); # d
@@ -51,8 +57,14 @@ fn _vani_ctl_path(card) {
     store8(p+14, 111); # o
     store8(p+15, 108); # l
     store8(p+16, 67);  # C
-    store8(p+17, 48 + (card % 10));
-    store8(p+18, 0);
+    var i = 17;
+    if (card >= 10) {
+        store8(p + i, 48 + (card / 10));
+        i = i + 1;
+    }
+    store8(p + i, 48 + (card % 10));
+    i = i + 1;
+    store8(p + i, 0);
     return p;
 }
 
@@ -62,6 +74,7 @@ fn _vani_ctl_path(card) {
 
 fn vani_mixer_open(card) {
     var path = _vani_ctl_path(card);
+    if (path == 0) { return vani_err_result(VANI_ERR_MIXER_OPEN); }
     var fd = syscall(2, path, 2, 0); # O_RDWR
     if (fd < 0) { return vani_err_result(VANI_ERR_MIXER_OPEN); }
     var m = alloc(16);

@@ -145,14 +145,26 @@ vani/
 
 ### P(-1): Scaffold Hardening
 
-0. Read roadmap, CHANGELOG, audit history — know what was intended
-1. Cleanliness: `cyrius build programs/smoke.cyr` (0 warnings),
-   `cyrius lint` (0 warnings), `cyrius fmt --check` diff-clean
-2. Test sweep: `cyrius test tests/tcyr/vani.tcyr` 100% pass
-3. Internal deep review — gaps, correctness, docs
-4. External research — ALSA UAPI / kernel CVE sweep
-5. Security audit — `docs/audit/YYYY-MM-DD-audit.md`
-6. Documentation audit — CLAUDE.md, roadmap, CHANGELOG
+The full P(-1) checklist (10 items) lives in
+`docs/development/roadmap.md` under the "P(-1) — Scaffold
+hardening" section, and the per-sweep CVE research scope lives
+under "Security & CVE sweep cadence". The roadmap is the source
+of truth — this section is just the working summary:
+
+- Runs **before every minor bump**, never skipped on a quiet release.
+- Cleanliness gates: `cyrius build programs/smoke.cyr`,
+  `cyrius lint`, `cyrius fmt --check`, `cyrius vet` — all clean.
+- Test sweep: `cyrius test tests/tcyr/vani.tcyr` 100 % pass;
+  `cyrius distlib` diff-clean.
+- Bench baseline: `cyrius bench tests/bcyr/vani.bcyr` (from v0.2.0+).
+- **External CVE / 0-day web research** — Linux ALSA / sound/core
+  / sound/pcm / sound/usb / sound/hda CVEs since prior sweep,
+  ALSA UAPI struct drift, USB-audio class CVEs, cyrius toolchain
+  CVEs. Map each hit to vani code paths.
+- Security audit doc filed at `docs/audit/YYYY-MM-DD-audit.md`.
+- HIGH / MED findings land with regression assertions.
+- Even a clean sweep ships an audit doc — "swept, clean as of
+  YYYY-MM-DD against kernel X.Y" — so we have a paper trail.
 
 ### Work Loop
 

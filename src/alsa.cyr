@@ -20,19 +20,43 @@
 # ================================================================
 
 # Build ALSA device path: /dev/snd/pcmC{card}D{device}{type}
-# type: 'p' = playback, 'c' = capture
+# type: 'p' = playback, 'c' = capture.
+#
+# Card and device numbers up to 99 are encoded as 1-2 decimal
+# digits. Anything ≥ 100 returns 0 — caller's open() will then
+# fail cleanly rather than silently routing to the wrong device.
+# Audit MED-1 (2026-04-30): the prior `48 + (card % 10)` encoding
+# truncated card 10 → "C0", colliding with card 0 on systems with
+# more than 10 sound cards (multi-USB-interface setups).
 fn _audio_devpath(card, device, typ) {
+    if (card < 0)    { return 0; }
+    if (device < 0)  { return 0; }
+    if (card > 99)   { return 0; }
+    if (device > 99) { return 0; }
     var path = alloc(32);
-    # /dev/snd/pcmC0D0p
+    # /dev/snd/pcmC
     store8(path, 47); store8(path+1, 100); store8(path+2, 101); store8(path+3, 118);
     store8(path+4, 47); store8(path+5, 115); store8(path+6, 110); store8(path+7, 100);
     store8(path+8, 47); store8(path+9, 112); store8(path+10, 99); store8(path+11, 109);
     store8(path+12, 67);
-    store8(path+13, 48 + (card % 10));
-    store8(path+14, 68);
-    store8(path+15, 48 + (device % 10));
-    store8(path+16, typ);
-    store8(path+17, 0);
+    var i = 13;
+    if (card >= 10) {
+        store8(path + i, 48 + (card / 10));
+        i = i + 1;
+    }
+    store8(path + i, 48 + (card % 10));
+    i = i + 1;
+    store8(path + i, 68);  # 'D'
+    i = i + 1;
+    if (device >= 10) {
+        store8(path + i, 48 + (device / 10));
+        i = i + 1;
+    }
+    store8(path + i, 48 + (device % 10));
+    i = i + 1;
+    store8(path + i, typ);
+    i = i + 1;
+    store8(path + i, 0);
     return path;
 }
 
@@ -96,6 +120,7 @@ enum AlsaPcmState {
 # Open ALSA playback device, returns handle or 0 on failure
 fn audio_open_playback(card, device) {
     var path = _audio_devpath(card, device, 112);
+    if (path == 0) { return 0; }
     var fd = syscall(2, path, 1, 0);
     if (fd < 0) { return 0; }
     var dev = alloc(32);
@@ -109,6 +134,7 @@ fn audio_open_playback(card, device) {
 # Open ALSA capture device, returns handle or 0 on failure
 fn audio_open_capture(card, device) {
     var path = _audio_devpath(card, device, 99);
+    if (path == 0) { return 0; }
     var fd = syscall(2, path, 0, 0);
     if (fd < 0) { return 0; }
     var dev = alloc(32);
@@ -186,12 +212,26 @@ fn audio_drain(dev) {
 # `var xferi[16]` reserves the full 16 bytes the kernel reads — the
 # upstream `audio.cyr` had `var xferi[2]` which writes past the
 # stack slot. Fixed during the v0.1.0 absorb.
+#
+# AUDIO_FRAMES_MAX (defense-in-depth, audit 2026-04-30): cap the
+# frame count we hand to SNDRV_PCM_IOCTL_*I_FRAMES at 256 M frames
+# (~24 h of 192 kHz mono, more than any real session). Mitigates
+# the CVE-2025-40269 class — kernel transfer paths that did
+# narrower-int arithmetic on (frames * bytes_per_frame). A bounded
+# frame count keeps the kernel's product well under 2^32 even for
+# 8-channel 32-bit-per-sample formats.
+
+enum AudioBounds {
+    AUDIO_FRAMES_MAX = 268435456;  # 2^28
+}
 
 # Write interleaved frames to playback device.
 # buf:    pointer to sample data (interleaved)
 # frames: number of frames (1 frame = channels * bytes_per_sample)
 # Returns: number of frames written, or negative on error.
 fn audio_write(dev, buf, frames) {
+    if (frames < 0)                { return 0 - 1; }
+    if (frames > AUDIO_FRAMES_MAX) { return 0 - 1; }
     var xferi[16];
     store64(&xferi, buf);
     store64(&xferi + 8, frames);
@@ -205,6 +245,8 @@ fn audio_write(dev, buf, frames) {
 # frames: number of frames to read
 # Returns: number of frames read, or negative on error.
 fn audio_read(dev, buf, frames) {
+    if (frames < 0)                { return 0 - 1; }
+    if (frames > AUDIO_FRAMES_MAX) { return 0 - 1; }
     var xferi[16];
     store64(&xferi, buf);
     store64(&xferi + 8, frames);

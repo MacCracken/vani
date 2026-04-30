@@ -36,6 +36,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stack) but wrote 16 bytes through it — bug carried over from
   upstream `cyrius/lib/audio.cyr`. Corrected to `var xferi[16]`
   during the absorb.
+- **First P(-1) scaffold-hardening sweep** (audit
+  `docs/audit/2026-04-30-audit.md`):
+  - HIGH-1 — added missing transitive stdlib deps (`patra`,
+    `freelist`, `fs`, `process`) that yukti requires. Build was
+    warning "will crash at runtime" on `patra_*` symbols; only
+    safe today because `vani_open_yukti` is a stub.
+  - MED-1 — `_audio_devpath` (`src/alsa.cyr`) and
+    `_vani_ctl_path` (`src/mixer.cyr`) used `card % 10` to
+    encode the card digit, silently routing card 10 to card 0.
+    Replaced with proper 1-2 digit decimal encoding; cards 100+
+    return null so the open() that follows fails cleanly.
+  - LOW-1 — bounded `vani_ring_new` and `_next_pow2` at 1 GiB
+    (`VANI_RING_MAX_BYTES`). Prevents pathological capacity
+    requests from overflowing the doubling loop.
+  - DEFENSE-IN-DEPTH (CVE-2025-40269 class) — `audio_write` /
+    `audio_read` now reject frame counts above `AUDIO_FRAMES_MAX`
+    (2^28 = 256 M frames). Mitigates kernel transfer paths that
+    historically did narrower-int arithmetic on
+    `frames * bytes_per_frame`.
+
+### Tests
+
+- `tests/tcyr/vani.tcyr` grows an `audit-2026-04-30` group: 8 test
+  functions / 20 assertions. Suite total 62 → 82 assertions, all
+  passing.
 
 ### Architecture
 

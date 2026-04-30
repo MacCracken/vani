@@ -201,6 +201,83 @@ fn test_direction_constants() {
 }
 
 # ================================================================
+# Audit 2026-04-30 regressions
+# ================================================================
+# Each fix lands with an assertion that would have caught the
+# original bug. See docs/audit/2026-04-30-audit.md.
+
+# MED-1: card / device numbers ≥ 10 must produce distinct paths
+# from card 0 — the old `% 10` encoding silently collided.
+fn test_audit_med1_card_10_not_collides_with_0() {
+    var p0  = _audio_devpath(0,  0,  112);
+    var p10 = _audio_devpath(10, 0,  112);
+    assert(p0  != 0,  "card 0 path");
+    assert(p10 != 0,  "card 10 path");
+    # Compare byte-by-byte — they must differ at the card-digit slot.
+    # /dev/snd/pcmC{0|10}D0p — diverge at offset 13.
+    assert(load8(p10 + 13) == 49, "card 10 first digit '1'");
+    assert(load8(p10 + 14) == 48, "card 10 second digit '0'");
+    # Card 0 has a single digit at offset 13.
+    assert(load8(p0 + 13)  == 48, "card 0 digit '0'");
+    return 0;
+}
+
+fn test_audit_med1_card_99_max_supported() {
+    var p99 = _audio_devpath(99, 0, 112);
+    assert(p99 != 0, "card 99 still encodes");
+    assert(load8(p99 + 13) == 57, "card 99 first digit '9'");
+    assert(load8(p99 + 14) == 57, "card 99 second digit '9'");
+    return 0;
+}
+
+fn test_audit_med1_card_100_rejected() {
+    var p100 = _audio_devpath(100, 0, 112);
+    assert_eq(p100, 0, "card 100 returns null");
+    return 0;
+}
+
+fn test_audit_med1_negative_card_rejected() {
+    var pneg = _audio_devpath(0 - 1, 0, 112);
+    assert_eq(pneg, 0, "card -1 returns null");
+    return 0;
+}
+
+fn test_audit_med1_ctl_path_two_digits() {
+    var p10 = _vani_ctl_path(10);
+    assert(p10 != 0, "controlC10 encodes");
+    assert(load8(p10 + 17) == 49, "first digit '1'");
+    assert(load8(p10 + 18) == 48, "second digit '0'");
+    var p100 = _vani_ctl_path(100);
+    assert_eq(p100, 0, "controlC100 rejected");
+    return 0;
+}
+
+# LOW-1: malicious capacity must not loop the pow-of-2 helper.
+fn test_audit_low1_ring_capacity_capped() {
+    var rb = vani_ring_new(VANI_RING_MAX_BYTES + 1);
+    assert_eq(rb, 0, "1 GiB + 1 byte rejected");
+    var rb2 = vani_ring_new(VANI_RING_MAX_BYTES);
+    assert(rb2 != 0, "exactly 1 GiB accepted");
+    return 0;
+}
+
+fn test_audit_low1_next_pow2_bounds() {
+    assert_eq(_next_pow2(0 - 1), 0, "negative rejected");
+    assert_eq(_next_pow2(0),     0, "zero rejected");
+    assert_eq(_next_pow2(VANI_RING_MAX_BYTES + 1), 0, "above cap rejected");
+    return 0;
+}
+
+# DEFENSE-IN-DEPTH (CVE-2025-40269 class): audio_write/read must
+# refuse frame counts that could trigger narrower-int kernel
+# arithmetic. We can't actually call the syscall here without a
+# real fd, but we can prove the bound exists.
+fn test_audit_cve_2025_40269_frames_max_constant() {
+    assert_eq(AUDIO_FRAMES_MAX, 268435456, "2^28 cap");
+    return 0;
+}
+
+# ================================================================
 # Test runner
 # ================================================================
 
@@ -232,6 +309,16 @@ fn main() {
 
     test_group("device");
     test_direction_constants();
+
+    test_group("audit-2026-04-30");
+    test_audit_med1_card_10_not_collides_with_0();
+    test_audit_med1_card_99_max_supported();
+    test_audit_med1_card_100_rejected();
+    test_audit_med1_negative_card_rejected();
+    test_audit_med1_ctl_path_two_digits();
+    test_audit_low1_ring_capacity_capped();
+    test_audit_low1_next_pow2_bounds();
+    test_audit_cve_2025_40269_frames_max_constant();
 
     assert_summary();
     return 0;
