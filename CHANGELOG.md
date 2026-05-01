@@ -5,7 +5,16 @@ All notable changes to Vani will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — Unreleased
+## [Unreleased]
+
+## [0.3.0] — 2026-04-30
+
+First public release. Foundation, full HW_PARAMS / SW_PARAMS,
+mixer scaffold, latency presets, real-HW verification on onboard
+HDA Generic, and yukti integration all roll up into this cut —
+the v0.1.0 / v0.2.0 / v0.3.0 milestones from the development
+roadmap were never tagged individually, so 0.3.0 ships them
+together as the first release on record.
 
 ### Verified
 
