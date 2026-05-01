@@ -7,6 +7,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-05-01
+
+Audio-core distribution profile. Driven by cyrius-doom's
+"6-of-106-symbols" usage report — proposal at
+[cyrius-doom/docs/proposals/vani-audio-core-profile.md](https://github.com/MacCracken/cyrius-doom/blob/main/docs/proposals/vani-audio-core-profile.md).
+Bumping cyrius-doom from vani 0.3.0 → 0.9.0 grew its binary by
++340 KB (259,920 → 600,608 B) for a 117-line audio module that
+calls 6 vani symbols. The `core` profile gives playback-only
+consumers a much smaller bundle without changing the full bundle
+or the API surface.
+
+### Added
+
+- **`[lib.core]` distribution profile** in `cyrius.cyml`. Single
+  module: `src/alsa.cyr`. Same `cyrius distlib` invocation pattern
+  yukti uses for its `dist/yukti-core.cyr`. Generated via
+  `cyrius distlib core` → `dist/vani-core.cyr`.
+- **`dist/vani-core.cyr`** — 29,015 bytes (vs 76,124 for the full
+  bundle, **62% smaller**). 22 public `audio_*` symbols covering
+  the entire PCM playback / capture path (open / set_params /
+  prepare / start / write / read / drain / drop / state / resume /
+  query_caps / can_set_params / close + 4 getters). Strict subset
+  of the full surface — no SemVer risk, additive only.
+  `src/alsa.cyr` is intentionally self-contained (zero
+  cross-module references in its source) so the bundle is a
+  single-file standalone consumable.
+- **`docs/api-surface.core.snapshot`** — 22 public symbols, sorted,
+  same `module::name/arity` format as the full snapshot. Captured
+  as the v1.0.0 freeze baseline for the core profile.
+- **CI dual-bundle gate**: `.github/workflows/ci.yml`'s "Verify
+  dist bundles" step now regenerates both `dist/vani.cyr` and
+  `dist/vani-core.cyr` and fails on either's drift.
+- **Release dual-artifact**: `.github/workflows/release.yml` ships
+  both `vani-X.Y.Z.cyr` and `vani-X.Y.Z-core.cyr` alongside the
+  smoke ELFs and SHA256SUMS.
+
+### Changed
+
+- Consumer `[deps.vani]` blocks can now opt into the core profile
+  by changing one line in their manifest:
+  ```toml
+  [deps.vani]
+  git = "https://github.com/MacCracken/vani.git"
+  tag = "0.9.1"
+  modules = ["dist/vani-core.cyr"]   # ← was "dist/vani.cyr"
+  ```
+  Drop-in for any consumer that only calls the `audio_*` shim.
+  Source code in the consumer doesn't change because the
+  `audio_*` ABI is byte-identical between profiles.
+
+### Verified
+
+- `cyrius distlib` + `cyrius distlib core` both regenerate
+  diff-clean against the v0.9.1 header.
+- 258/258 tests pass; 13/13 benches within noise of the 0.9.0
+  baseline (no source changes in `src/` — only manifest +
+  tooling additions).
+- Both x86_64 and aarch64 cross-builds clean against the full
+  profile.
+- Core profile bundle parses standalone (`note: bundle has
+  unresolved symbols (expected for consumer-included bundles;
+  stdlib is supplied by the consumer's `[deps] stdlib` list)`).
+  No transitive pulls from `src/error.cyr` or `src/format.cyr`
+  needed — answering the proposal's open question #4.
+
+### References
+
+- ADR forthcoming if a third such profile or override pattern
+  lands; today both profile-mechanism and the yukti/patra
+  git overrides share the "fast-moving sibling dep" shape
+  documented in `docs/adr/0001-yukti-git-override.md`.
+
 ## [0.9.0] — 2026-04-30
 
 Pre-1.0 release candidate. Closes the in-vani v1.0.0 work; the

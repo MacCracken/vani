@@ -10,12 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `0.9.0` (pre-1.0 release candidate) |
-| Released | 2026-04-30 |
+| Current version | `0.9.1` (pre-1.0 release candidate, audio-core profile) |
+| Released | 2026-05-01 |
 | Cyrius toolchain pin | `5.7.48` |
 | Yukti pin (`[deps.yukti]`) | tag `2.2.1` (git override until cyrius re-bundles ≥ 2.2.1) |
 | Patra pin (`[deps.patra]`) | tag `1.9.2` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.9.2) |
-| Latest P(-1) audit | [`docs/audit/2026-04-30-v0.9.0-audit.md`](../audit/2026-04-30-v0.9.0-audit.md) |
+| Distribution profiles | full (`dist/vani.cyr`, 76 KB / 106 symbols) and core (`dist/vani-core.cyr`, 29 KB / 22 symbols) |
+| Latest P(-1) audit | [`docs/audit/2026-05-01-v0.9.1-audit.md`](../audit/2026-05-01-v0.9.1-audit.md) |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0) |
 
 ## Test / Bench Counts
@@ -31,8 +32,10 @@
 
 | Artifact | Size | Notes |
 |----------|------|-------|
-| `dist/vani.cyr` | 2072 lines (v0.3.0) | Consumer-facing single-include bundle |
-| `build/vani_smoke` | 438168 bytes (DCE off) | x86_64 ELF link-check binary |
+| `dist/vani.cyr` (full profile) | 76,124 B / 2101 lines (v0.9.1) | Full consumer-facing bundle: 106 public symbols across alsa/error/format/buffer/device/playback/capture/mixer |
+| `dist/vani-core.cyr` (core profile) | 29,015 B / 800 lines (v0.9.1) | Playback-only single-module bundle: 22 `audio_*` symbols from `src/alsa.cyr` only. **62% smaller** than full. |
+| `build/vani_smoke` | ~438 KB (DCE off) | x86_64 ELF link-check binary |
+| `build/vani_smoke-aarch64` | (built per cut) | aarch64 ELF link-check binary (since 0.9.0) |
 | `build/vani_smoke` (DCE) | bumped per release | Set in CI release workflow |
 
 ## Real-HW Verification
@@ -74,6 +77,7 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `0.9.1` | 2026-05-01 | `core` distribution profile added. `cyrius distlib core` → `dist/vani-core.cyr` (29 KB, 22 symbols, 62% smaller than full). Drives the cyrius-doom audio-core consumer story without touching the full bundle or the public API. |
 | `0.9.0` | 2026-04-30 | Pre-1.0 release candidate. aarch64 cross-build unblocked (73-site syscall migration); CI/release ships `vani-0.9.0-smoke-aarch64-linux`; `[deps.patra]` git-pinned at 1.9.2; API surface baseline captured at `docs/api-surface.snapshot`. |
 | `0.3.0` | 2026-04-30 | First public release. Foundation through yukti integration; rolls up the v0.1.0 / v0.2.0 / v0.3.0 development milestones. |
 

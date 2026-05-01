@@ -87,15 +87,23 @@ jobs:
       - name: Vet
         run: cyrius vet programs/smoke.cyr
 
-      - name: Verify dist bundle is in sync with src/
+      - name: Verify dist bundles are in sync with src/
+        # Both profiles regenerate cleanly. `core` is the playback-only
+        # subset (src/alsa.cyr) introduced in 0.9.1 — see
+        # cyrius-doom/docs/proposals/vani-audio-core-profile.md.
         run: |
           cyrius distlib
-          if ! git diff --quiet dist/vani.cyr; then
-            echo "ERROR: dist/vani.cyr is stale. Run 'cyrius distlib' and commit the result."
-            git --no-pager diff dist/vani.cyr | head -40
-            exit 1
-          fi
-          echo "dist/vani.cyr matches src/"
+          cyrius distlib core
+          fail=0
+          for bundle in dist/vani.cyr dist/vani-core.cyr; do
+            if ! git diff --quiet "$bundle"; then
+              echo "ERROR: $bundle is stale. Run 'cyrius distlib [core]' and commit the result."
+              git --no-pager diff "$bundle" | head -40
+              fail=1
+            fi
+          done
+          [ $fail -eq 0 ] || exit 1
+          echo "dist bundles match src/"
 
       - name: Build smoke (DCE)
         run: |

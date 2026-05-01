@@ -75,8 +75,10 @@ jobs:
       - name: Test
         run: cyrius test tests/tcyr/vani.tcyr
 
-      - name: Regenerate dist bundle
-        run: cyrius distlib
+      - name: Regenerate dist bundles (full + core)
+        run: |
+          cyrius distlib
+          cyrius distlib core
 
       - name: Clean toolchain artifacts
         run: rm -f cyrius-*.tar.gz
@@ -86,10 +88,17 @@ jobs:
           TAG="${GITHUB_REF_NAME#v}"
           # Source tarball — what consumers building from source clone.
           git archive --format=tar.gz --prefix="vani-${TAG}/" -o "vani-${TAG}-src.tar.gz" HEAD
-          # Single-file dist bundle — the primary consumer artifact
-          # (vani is a library; consumers `include` this via [deps.vani]
-          # → modules = ["dist/vani.cyr"]).
+          # Single-file dist bundles — primary consumer artifacts.
+          # Full profile: vani's complete public surface (the vani_*
+          # device wrapper, ring buffer, capture, mixer, yukti
+          # adapter, format helpers, error helpers).
+          # Core profile: PCM playback shim only (src/alsa.cyr) — much
+          # smaller; suits consumers that just want
+          # open/set_params/write/drain/close and don't want to pay
+          # parse/codegen cost for the higher-level API. See
+          # cyrius-doom/docs/proposals/vani-audio-core-profile.md.
           cp dist/vani.cyr "vani-${TAG}.cyr"
+          cp dist/vani-core.cyr "vani-${TAG}-core.cyr"
           # vani has no CLI binary, but the smoke ELFs are the build
           # proof — ship them so consumers can sanity-check the toolchain
           # produced a working linked artifact for this tag on each arch.

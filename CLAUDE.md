@@ -10,7 +10,10 @@
 goddess of knowledge, music, and art) — Audio device I/O for the
 Cyrius ecosystem. The voice of the system.
 
-- **Type**: Cyrius shared library (single-include `dist/vani.cyr`)
+- **Type**: Cyrius shared library — two distribution profiles:
+  full (`dist/vani.cyr`, 76 KB, 106 symbols) and core
+  (`dist/vani-core.cyr`, 29 KB, 22 `audio_*` symbols — playback
+  path only, single module from `src/alsa.cyr`)
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius`, currently `5.7.48`)
 - **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
@@ -360,7 +363,7 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 - **Tag filter**: release workflow triggers on `v[0-9]+.[0-9]+.[0-9]+` and bare `[0-9]+.[0-9]+.[0-9]+` — semver-only, optional `v` prefix.
 - **Version-verify gate**: release asserts `VERSION == git tag` before building. Mismatch fails the run.
 - **Lint step**: CI runs `cyrius lint` per source file. Any warning fails the build.
-- **Distlib drift gate**: CI regenerates `dist/vani.cyr` and rejects any diff against the committed bundle.
+- **Distlib drift gate**: CI regenerates both `dist/vani.cyr` and `dist/vani-core.cyr` and rejects any diff against the committed bundles.
 - **Lock-file presence gate**: CI asserts `cyrius.lock` exists before resolving deps — defends supply-chain integrity for the git-pinned yukti dep.
 - **Workflow layout**:
   - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — build, lint, fmt, vet, distlib drift, test, bench, security pattern scan, docs check; reusable via `workflow_call`

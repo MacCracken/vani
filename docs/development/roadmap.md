@@ -2,21 +2,31 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest P(-1) audit at
-`docs/audit/2026-04-30-v0.9.0-audit.md` (priors:
+`docs/audit/2026-05-01-v0.9.1-audit.md` (priors:
+`docs/audit/2026-04-30-v0.9.0-audit.md`,
 `docs/audit/2026-04-30-v0.3.0-audit.md`,
 `docs/audit/2026-04-30-audit.md`).
 
-## v0.3.0 / v0.9.0 — done
+## v0.3.0 / v0.9.0 / v0.9.1 — done
 
 - **0.3.0** (released 2026-04-30): yukti integration —
   `vani_open_yukti(desc)` thin adapter, real-HW DEVICES PASS on
   dev box.
-- **0.9.0** (cut 2026-04-30, pre-1.0 RC): aarch64 cross-build
+- **0.9.0** (released 2026-04-30, pre-1.0 RC): aarch64 cross-build
   unblocked (73-site syscall migration to stdlib wrappers; patra
   pinned at 1.9.2 via git override); CI cross-build gate
   re-enabled; release ships `vani-X.Y.Z-smoke-aarch64-linux`;
   API surface baseline captured at `docs/api-surface.snapshot`
   (106 public symbols).
+- **0.9.1** (released 2026-05-01): `[lib.core]` profile. Single
+  `cyrius distlib core` → `dist/vani-core.cyr` (29 KB / 22
+  symbols; 62% smaller than full). Driven by cyrius-doom's
+  6-of-106-symbols usage report — proposal collapsed from a
+  three-cut series (0.9.1/0.9.2/0.9.3) to a single cut because
+  `src/alsa.cyr` is fully self-contained (proposal's open
+  question #4). Second baseline at
+  `docs/api-surface.core.snapshot`. Both bundles now drift-gated
+  in CI; release ships `vani-X.Y.Z.cyr` and `vani-X.Y.Z-core.cyr`.
 
 The cyrius 5.8.0 fold-in pin (cyrius/cyrius.cyml `[deps.vani]`)
 points at whatever vani tag is current at cut time — handled on
