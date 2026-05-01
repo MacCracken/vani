@@ -2,71 +2,21 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest P(-1) audit at
-`docs/audit/2026-04-30-audit.md`.
+`docs/audit/2026-04-30-v0.3.0-audit.md` (prior:
+`docs/audit/2026-04-30-audit.md`).
 
-## Handoff — pick up here when yukti 2.2.0 ships
+## v0.3.0 — done (handoff resolved)
 
-Vani's v0.3.0 multi-device path is the only thing blocked on
-upstream right now. Yukti 2.1.2 captured the audio-domain
-punch list at
-[`yukti/docs/development/roadmap.md`](https://github.com/MacCracken/yukti/blob/main/docs/development/roadmap.md)
-(local: `~/Repos/yukti/docs/development/roadmap.md`).
+Yukti integration landed. `vani_open_yukti(desc)` is a thin
+adapter — yukti owns device identity (card, device, direction,
+hw_id), vani opens the kernel handle. Real-HW DEVICES PASS on
+the dev box (8 PCM endpoints; first playback at card 1 device
+0 / `pci:0000:04:00.6:dev0:p`). Tag pending — gated only on
+landing this audit's commit and cutting the tag itself.
 
-When yukti 2.2.0 ships and `lib/yukti.cyr` exposes the audio
-descriptor surface (`yukti_audio_devices`, `yukti_audio_card`,
-`yukti_audio_device`, `yukti_audio_subdevice`,
-`yukti_audio_direction`, `yukti_audio_name`, `yukti_audio_hw_id`),
-do this in vani in order:
-
-1. **Re-resolve deps**: `rm -rf lib && mkdir lib && cyrius deps`.
-   The yukti 2.2.0 bundle should now contain the audio surface.
-   Quick sanity: `grep '^fn yukti_audio_' lib/yukti.cyr` should
-   list at least the seven accessors above.
-2. **Replace the stub**: `src/device.cyr` `vani_open_yukti(desc,
-   direction)` currently returns
-   `VANI_ERR_YUKTI_DESCRIPTOR` with a "pending — see roadmap
-   v0.3.0" detail. Replace the body with: read card / device
-   / subdevice / direction off the yukti descriptor, route to
-   `audio_open_playback(card, device)` or
-   `audio_open_capture(card, device)`, wrap the result via the
-   existing `_vani_device_wrap` helper (pass through the same
-   direction value yukti returned — yukti's
-   `YUKTI_AUDIO_PLAYBACK = 0` / `_CAPTURE = 1` matches vani's
-   `VaniDirection` 1:1 by design, so it's a copy not a map).
-3. **Add CPU tests**: hand-build a fake yukti `AudioDeviceInfo`
-   buffer with known field values, call `vani_open_yukti`
-   against a closed device fd path (which will fail at the
-   real `open()` syscall, but the field-extraction path runs
-   first — verify the right card / device get pulled). Or
-   easier: test the pure-data accessor projection without
-   actually opening anything.
-4. **Add a `vani_devices_for_direction(direction)`
-   convenience wrapper**: take a yukti vec, filter by
-   direction, return a vec of vani-friendly descriptors.
-   Saves consumers from importing yukti directly.
-5. **`programs/devices.cyr`**: CLI that calls
-   `yukti_audio_devices()`, prints each entry with vani's
-   formatting, then opens the first playback device via
-   `vani_open_yukti` and runs the same sequence as
-   `programs/probe.cyr` (open → state → configure → state →
-   close). Real-HW PASS on the dev box's onboard audio is the
-   acceptance gate.
-6. **CHANGELOG entry** under `[0.1.0] — Unreleased` for the
-   v0.3.0 #8/#9 items now closing.
-7. **Run the full P(-1) sweep before tagging 0.3.0**:
-   - cleanliness gates (build / lint / fmt / vet)
-   - test suite 100% pass (was 249/249 at handoff)
-   - distlib diff-clean
-   - bench baseline against `bench-history.csv`
-   - **CVE / 0-day web research** — see "Security & CVE sweep
-     cadence" below; specifically look for any new
-     `sound/usb`, `sound/core`, or aloop CVEs since
-     2026-04-30.
-   - File new audit doc at `docs/audit/YYYY-MM-DD-audit.md`.
-8. **Tag 0.3.0** once #1–#7 above are clean. Update
-   `cyrius/cyrius.cyml` `[deps.vani]` (or stdlib pin)
-   alongside, since the 5.8.0 fold-in pin needs to point at
-   whatever vani version is current at cut time.
+The cyrius 5.8.0 fold-in pin (cyrius/cyrius.cyml `[deps.vani]`)
+points at whatever vani tag is current at cut time — handled on
+the cyrius side, not here.
 
 ## Next minor — v0.4.0
 

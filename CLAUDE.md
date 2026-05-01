@@ -8,12 +8,12 @@ Cyrius ecosystem. The voice of the system.
 
 - **Type**: Cyrius library (include-chain) + dist bundle
 - **License**: GPL-3.0-only
-- **Language**: Cyrius 5.7.39 (`cyrius.cyml: cyrius = "5.7.39"`)
+- **Language**: Cyrius 5.7.48 (`cyrius.cyml: cyrius = "5.7.48"`)
 - **Version**: 0.1.0 — `[Unreleased]`; foundation through latency
-  presets all landed and verified on real onboard audio (HDA
-  Generic). One blocker remains: yukti 2.2.0 audio domain (vani
-  v0.3.0 #8/#9). See `docs/development/roadmap.md` "Handoff"
-  section for the entry point.
+  presets and yukti integration (`vani_open_yukti(desc)`) all
+  landed and verified on real onboard audio (HDA Generic — 8 PCM
+  endpoints across cards 0/1/2). v0.3.0 cut ready; v0.4.x next
+  (aarch64 unblock — see `docs/development/roadmap.md`).
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 
 ## Goal

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0] — Unreleased
 
+### Verified
+
+- **Second P(-1) scaffold-hardening sweep** for the v0.3.0 cut
+  (audit `docs/audit/2026-04-30-v0.3.0-audit.md`). One LOW
+  finding (CI lacked defense-in-depth lock-file presence guard)
+  fixed in this sweep with a new "Lock file present" step in
+  `.github/workflows/ci.yml`. No HIGH / MED findings. CVE window
+  unchanged from prior sweep (same date, hours apart). Bench
+  baseline within noise of prior commit `e031c0d` — minor
+  improvements from the cyrius 5.7.40 → 5.7.48 toolchain bump.
+- **Cleanliness pass** as P(-1) prerequisite: renamed
+  `test_ioctl_type_is_A` → `_is_a` and `test_ctl_ioctl_type_is_U`
+  → `_is_u` (cyrlint snake_case rule); `cyrius fmt` rewrites on
+  `src/alsa.cyr`, `src/device.cyr`, `src/mixer.cyr`,
+  `programs/latency_test.cyr`, `tests/tcyr/vani.tcyr`,
+  `tests/bcyr/vani.bcyr`; `dist/vani.cyr` regenerated.
+- **GitHub Actions CI/release pipeline** mirroring yukti's
+  three-job CI (build/security/docs) and tag-driven release
+  flow. Vani-specific deltas: vet runs on `programs/smoke.cyr`
+  (no CLI binary), single `dist/vani.cyr` drift check (no
+  `-core` profile), no kernel-safe tripwire / fuzz steps,
+  aarch64 cross-build deferred with comment pointer to the
+  v0.4.x roadmap section. Smoke ELF shipped as
+  `vani-X.Y.Z-smoke-x86_64-linux` so consumers can sanity-check
+  the toolchain produced a working artifact.
+
 ### Added
 
 - **v0.3.0 yukti integration** — `vani_open_yukti(desc)` is now a
