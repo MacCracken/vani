@@ -14,9 +14,9 @@ include "src/lib.cyr"
 fn main() {
     alloc_init();
     var banner = "vani smoke: lib.cyr linked clean\n";
-    syscall(1, 1, banner, strlen(banner));
+    sys_write(1, banner, strlen(banner));
     return 0;
 }
 
 var exit_code = main();
-syscall(60, exit_code);
+sys_exit(exit_code);

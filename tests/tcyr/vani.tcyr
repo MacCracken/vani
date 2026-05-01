@@ -885,4 +885,4 @@ fn main() {
 }
 
 var ec = main();
-syscall(60, ec);
+sys_exit(ec);

@@ -31,7 +31,7 @@ enum ToneCfg {
     TONE_AMPLITUDE  = 4000;
 }
 
-fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 
 # Store an i16 little-endian at p (low byte first).
 fn _store_i16le(p, v) {
@@ -66,7 +66,7 @@ fn _build_square_wave(frames) {
 fn main() {
     alloc_init();
     _puts("vani tone — 440 Hz square, 200 ms, card ");
-    syscall(1, 1, "1 device 0\n", 11);
+    sys_write(1, "1 device 0\n", 11);
 
     var res = vani_open_playback(TONE_CARD, TONE_DEVICE);
     if (is_ok(res) == 0) {
@@ -105,7 +105,7 @@ fn main() {
         return 1;
     }
     _puts("wrote frames; xrun_count=");
-    syscall(1, 1, "?\n", 2);
+    sys_write(1, "?\n", 2);
 
     vani_drain(d);
     vani_close(d);
@@ -114,4 +114,4 @@ fn main() {
 }
 
 var ec = main();
-syscall(60, ec);
+sys_exit(ec);

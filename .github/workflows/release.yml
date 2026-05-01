@@ -54,11 +54,23 @@ jobs:
       - name: Verify dep hashes
         run: cyrius deps --verify
 
-      - name: Build smoke (DCE)
+      - name: Build smoke (DCE) — x86_64
         run: |
           mkdir -p build
           CYRIUS_DCE=1 cyrius build programs/smoke.cyr build/vani_smoke
           echo "vani_smoke: $(wc -c < build/vani_smoke) bytes"
+
+      - name: Cross-build smoke (DCE) — aarch64
+        # Released since vani 0.9.0; same playbook yukti's 2.1.3 used.
+        run: |
+          if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            echo "::error::cc5_aarch64 missing from Cyrius $CYRIUS_VERSION"
+            exit 1
+          fi
+          CYRIUS_DCE=1 cyrius build --aarch64 programs/smoke.cyr build/vani_smoke-aarch64
+          file build/vani_smoke-aarch64 | grep -q "aarch64" || {
+            echo "ERROR: build/vani_smoke-aarch64 is not an aarch64 ELF"; exit 1; }
+          echo "vani_smoke-aarch64: $(wc -c < build/vani_smoke-aarch64) bytes"
 
       - name: Test
         run: cyrius test tests/tcyr/vani.tcyr
@@ -78,11 +90,14 @@ jobs:
           # (vani is a library; consumers `include` this via [deps.vani]
           # → modules = ["dist/vani.cyr"]).
           cp dist/vani.cyr "vani-${TAG}.cyr"
-          # vani has no CLI binary, but the smoke ELF is the build
-          # proof — ship it so consumers can sanity-check the toolchain
-          # produced a working linked artifact for this tag.
+          # vani has no CLI binary, but the smoke ELFs are the build
+          # proof — ship them so consumers can sanity-check the toolchain
+          # produced a working linked artifact for this tag on each arch.
           if [ -f build/vani_smoke ]; then
             cp build/vani_smoke "vani-${TAG}-smoke-x86_64-linux"
+          fi
+          if [ -f build/vani_smoke-aarch64 ]; then
+            cp build/vani_smoke-aarch64 "vani-${TAG}-smoke-aarch64-linux"
           fi
           sha256sum vani-*.tar.gz vani-*.cyr vani-*-linux 2>/dev/null > SHA256SUMS
 

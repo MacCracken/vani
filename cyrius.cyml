@@ -51,7 +51,6 @@ stdlib = [
     "fnptr",
     "freelist",
     "process",
-    "patra",
     "sakshi",
 ]
 
@@ -66,3 +65,13 @@ stdlib = [
 git = "https://github.com/MacCracken/yukti.git"
 tag = "2.2.1"
 modules = ["dist/yukti.cyr"]
+
+# patra — pinned at 1.9.2 for aarch64 portability. Cyrius 5.7.48
+# still bundles patra 1.9.0 in its stdlib, which uses raw `SYS_OPEN`
+# (undefined on aarch64's generic syscall table). 1.9.2 migrated to
+# stdlib `sys_open` wrappers. Same pattern yukti uses for its own
+# patra dep. Drop this override once cyrius re-bundles patra ≥ 1.9.2.
+[deps.patra]
+git = "https://github.com/MacCracken/patra.git"
+tag = "1.9.2"
+modules = ["dist/patra.cyr"]

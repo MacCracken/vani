@@ -106,17 +106,24 @@ jobs:
       - name: Verify ELF
         run: xxd -l 4 build/vani_smoke | grep -q "7f45 4c46"
 
-      # Cross-build aarch64 — DEFERRED. vani's src/alsa.cyr was lifted
-      # from cyrius/lib/audio.cyr at v0.1.0 and still uses raw SYS_OPEN
-      # / syscall(SYS_*, ...) ioctl callers that don't translate to
-      # aarch64 syscall numbers. Yukti hit this exact issue and fixed
-      # it in 2.1.3 by migrating to the stdlib's arch-translating
-      # sys_open / sys_close / sys_ioctl wrappers. Vani needs the same
-      # migration; tracked in docs/development/roadmap.md.
-      #
-      # When that lands, drop this comment and re-enable a step like:
-      #   CYRIUS_DCE=1 cyrius build --aarch64 programs/smoke.cyr build/vani_smoke-aarch64
-      #   file build/vani_smoke-aarch64 | grep -q "aarch64"
+      - name: Cross-build aarch64
+        # 0.9.0 unblocked the aarch64 cross-build path: src/alsa.cyr,
+        # src/mixer.cyr, src/error.cyr, programs/* and tests/* migrated
+        # from raw `syscall(SYS_OPEN, ...)` to stdlib `sys_open` /
+        # `sys_close` / `sys_write` / `sys_exit` wrappers (and
+        # `syscall(SYS_IOCTL, ...)` for ioctl, which has the
+        # arch-correct constant on both peers). Patra pinned at 1.9.2
+        # via [deps.patra] for the same reason. Yukti's 2.1.3 playbook
+        # — same shape, same outcome.
+        run: |
+          if [ ! -x "$HOME/.cyrius/bin/cc5_aarch64" ]; then
+            echo "::error::cc5_aarch64 missing from Cyrius $CYRIUS_VERSION — aarch64 cross-build is required since 0.9.0"
+            exit 1
+          fi
+          CYRIUS_DCE=1 cyrius build --aarch64 programs/smoke.cyr build/vani_smoke-aarch64
+          file build/vani_smoke-aarch64 | grep -q "aarch64" || {
+            echo "ERROR: build/vani_smoke-aarch64 is not an aarch64 ELF"; exit 1; }
+          echo "vani_smoke-aarch64: $(wc -c < build/vani_smoke-aarch64) bytes"
 
       - name: Test
         run: cyrius test tests/tcyr/vani.tcyr

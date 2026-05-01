@@ -2,26 +2,27 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest P(-1) audit at
-`docs/audit/2026-04-30-v0.3.0-audit.md` (prior:
+`docs/audit/2026-04-30-v0.9.0-audit.md` (priors:
+`docs/audit/2026-04-30-v0.3.0-audit.md`,
 `docs/audit/2026-04-30-audit.md`).
 
-## v0.3.0 — done (handoff resolved)
+## v0.3.0 / v0.9.0 — done
 
-Yukti integration landed. `vani_open_yukti(desc)` is a thin
-adapter — yukti owns device identity (card, device, direction,
-hw_id), vani opens the kernel handle. Real-HW DEVICES PASS on
-the dev box (8 PCM endpoints; first playback at card 1 device
-0 / `pci:0000:04:00.6:dev0:p`). Tag pending — gated only on
-landing this audit's commit and cutting the tag itself.
+- **0.3.0** (released 2026-04-30): yukti integration —
+  `vani_open_yukti(desc)` thin adapter, real-HW DEVICES PASS on
+  dev box.
+- **0.9.0** (cut 2026-04-30, pre-1.0 RC): aarch64 cross-build
+  unblocked (73-site syscall migration to stdlib wrappers; patra
+  pinned at 1.9.2 via git override); CI cross-build gate
+  re-enabled; release ships `vani-X.Y.Z-smoke-aarch64-linux`;
+  API surface baseline captured at `docs/api-surface.snapshot`
+  (106 public symbols).
 
 The cyrius 5.8.0 fold-in pin (cyrius/cyrius.cyml `[deps.vani]`)
 points at whatever vani tag is current at cut time — handled on
 the cyrius side, not here.
 
-## Next minor — v0.4.0
-
-The latency / SW_PARAMS / suspend-resume / preset work landed
-already; one open item before the 0.4.0 tag:
+## Optional pre-1.0 work (not blocking 1.0)
 
 - [ ] **XRUN-rate benchmark under sustained load** — a stress
       harness that runs continuous playback for minutes,
@@ -31,34 +32,15 @@ already; one open item before the 0.4.0 tag:
       rate per preset (low-latency vs casual). Useful number:
       "0 xruns under N% CPU contention for M minutes" — sets
       a baseline for ecosystem consumers to regress against.
-      Skipped for the v0.1.x cuts because reproducing CPU
-      contention reliably needs more setup than a typical
-      P(-1) gate.
-
-## v0.4.x — aarch64 unblock
-
-Vani's `src/alsa.cyr` was lifted from `cyrius/lib/audio.cyr` at
-v0.1.0 and still uses raw `SYS_OPEN` / `syscall(SYS_*, ...)` ioctl
-callers that don't translate across architectures. `cyrius build
---aarch64 programs/smoke.cyr` fails with `undefined variable
-'SYS_OPEN'` plus syscall-arity warnings. The CI workflow leaves
-the cross-build step disabled with a comment pointing here.
-
-Yukti hit the same blocker and unblocked itself in 2.1.3 by
-migrating ~30 raw callers to the stdlib's arch-translating
-`sys_open` / `sys_close` / `sys_ioctl` / `sys_unlink` wrappers.
-Same playbook here:
-
-- [ ] Inventory raw `SYS_*` and numeric `syscall()` callers in
-      `src/alsa.cyr` and `src/mixer.cyr`.
-- [ ] Replace each with the stdlib wrapper from `lib/syscalls.cyr`
-      (or upstream the wrapper if missing).
-- [ ] `cyrius build --aarch64 programs/smoke.cyr build/vani_smoke-aarch64`
-      → exit 0, file output ELF aarch64.
-- [ ] Re-enable the `Cross-build aarch64` step in
-      `.github/workflows/ci.yml` (search for the deferred comment)
-      and the matching block in `release.yml` so release archives
-      ship `vani-X.Y.Z-smoke-aarch64-linux`.
+      Skipped for the 0.9.0 P(-1) sweep because reproducing CPU
+      contention reliably needs more setup than fits a release
+      gate.
+- [ ] **Portable `_clock_monotonic()` helper** for
+      `programs/throughput.cyr` / `programs/latency_test.cyr` —
+      currently x86_64-only via raw `syscall(228, ...)`. Either
+      add a small `#ifdef`-dispatched local helper or upstream
+      `sys_clock_gettime` to the cyrius stdlib. Lands when an
+      aarch64 dev host with real audio HW becomes available.
 
 ## v0.5.x — hardware coverage (HW-gated)
 
@@ -86,9 +68,9 @@ Need access to non-onboard audio to close out v0.2.0 #6 / #7:
 | # | Item | Status |
 |---|------|--------|
 | 1 | Multi-hardware integration coverage (3+ targets) | Onboard HDA verified; USB + HDMI gated on access (see v0.5.x above) |
-| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | Awaits cyrius-doom integration |
-| 3 | Second downstream consumer: one of `jalwa` / `dhvani` / `agnoshi` | Awaits those projects |
-| 4 | API surface diff via `cyrius_api_surface` captured as v1 baseline | Toolchain ships the tool (5.7.33) — run when the API stops moving |
+| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | Integration staged in cyrius-doom against vani 0.3.0 — pending the doom-side commit/tag. End-to-end smoke against shareware WAD passed (degrade path clean). |
+| 3 | Second downstream consumer: one of `jalwa` / `dhvani` / `agnoshi` | jalwa / dhvani still Rust (gated on Cyrius port). agnoshi is Cyrius (4.5.0 pin) but has no audio path yet (gated on agnoshi audio roadmap). |
+| 4 | API surface diff via `cyrius api-surface` captured as v1 baseline | **v0.9.0 baseline captured** at `docs/api-surface.snapshot` (106 public symbols). Diff against this at v1.0.0 freeze. |
 | 5 | Public API frozen; SemVer guarantees | Set after 1–3 land |
 | 6 | Migration-guide entry for any pre-1.0 breaking changes | Aggregate from CHANGELOG when freezing |
 

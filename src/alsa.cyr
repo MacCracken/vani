@@ -463,7 +463,7 @@ fn _hwp_interval_contains(hwp, int_idx, value) {
 fn audio_open_playback(card, device) {
     var path = _audio_devpath(card, device, 112);
     if (path == 0) { return 0; }
-    var fd = syscall(2, path, 1, 0);
+    var fd = sys_open(path, 1, 0);
     if (fd < 0) { return 0; }
     var dev = alloc(32);
     store64(dev, fd);
@@ -477,7 +477,7 @@ fn audio_open_playback(card, device) {
 fn audio_open_capture(card, device) {
     var path = _audio_devpath(card, device, 99);
     if (path == 0) { return 0; }
-    var fd = syscall(2, path, 0, 0);
+    var fd = sys_open(path, 0, 0);
     if (fd < 0) { return 0; }
     var dev = alloc(32);
     store64(dev, fd);
@@ -491,8 +491,8 @@ fn audio_open_capture(card, device) {
 fn audio_close(dev) {
     if (dev == 0) { return 0; }
     var fd = load64(dev);
-    syscall(16, fd, SNDRV_PCM_IOCTL_DROP, 0);
-    syscall(3, fd);
+    syscall(SYS_IOCTL, fd, SNDRV_PCM_IOCTL_DROP, 0);
+    sys_close(fd);
     return 0;
 }
 
@@ -569,7 +569,7 @@ period_frames, buffer_frames) {
         buffer_frames);
     }
 
-    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
+    var r = syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
     if (r < 0) { return r; }
 
     # Cache the negotiated params on the handle for later queries.
@@ -609,7 +609,7 @@ fn audio_set_sw_params(dev, start_threshold, stop_threshold, avail_min) {
     store64(&swp + SWP_SILENCE_THRESHOLD, 0);
     store64(&swp + SWP_SILENCE_SIZE,      0);
     store64(&swp + SWP_BOUNDARY,          AUDIO_FRAMES_MAX);
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_SW_PARAMS, &swp);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_SW_PARAMS, &swp);
 }
 
 # ================================================================
@@ -622,7 +622,7 @@ fn audio_set_sw_params(dev, start_threshold, stop_threshold, avail_min) {
 
 fn audio_resume(dev) {
     if (dev == 0) { return 0 - 1; }
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_RESUME, 0);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_RESUME, 0);
 }
 
 # ================================================================
@@ -641,7 +641,7 @@ fn audio_query_caps(dev, hwp) {
     if (dev == 0) { return 0 - 1; }
     if (hwp == 0) { return 0 - 1; }
     _hwp_init_any(hwp);
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, hwp);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, hwp);
 }
 
 # Lower-level: ask whether a specific (rate, channels, bit_depth)
@@ -670,7 +670,7 @@ fn audio_can_set_params(dev, rate, channels, bit_depth) {
     _hwp_interval_set_exact(&hwp,
     SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
     rate);
-    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, &hwp);
+    var r = syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, &hwp);
     if (r < 0) { return 0; }
     return 1;
 }
@@ -681,22 +681,22 @@ fn audio_can_set_params(dev, rate, channels, bit_depth) {
 
 # Prepare PCM device for playback or capture
 fn audio_prepare(dev) {
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_PREPARE, 0);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_PREPARE, 0);
 }
 
 # Start PCM playback or capture
 fn audio_start(dev) {
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_START, 0);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_START, 0);
 }
 
 # Immediately stop PCM and discard pending frames
 fn audio_drop(dev) {
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_DROP, 0);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_DROP, 0);
 }
 
 # Stop PCM after all pending frames are played
 fn audio_drain(dev) {
-    return syscall(16, load64(dev), SNDRV_PCM_IOCTL_DRAIN, 0);
+    return syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_DRAIN, 0);
 }
 
 # ================================================================
@@ -737,7 +737,7 @@ fn audio_write(dev, buf, frames) {
     store64(&xferi,      0);       # result (kernel writes here)
     store64(&xferi + 8,  buf);     # buf
     store64(&xferi + 16, frames);  # frames-in
-    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xferi);
+    var r = syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_WRITEI_FRAMES, &xferi);
     if (r < 0) { return r; }
     return load64(&xferi);  # result field — frames-actually-written
 }
@@ -753,7 +753,7 @@ fn audio_read(dev, buf, frames) {
     store64(&xferi,      0);       # result (kernel writes here)
     store64(&xferi + 8,  buf);     # buf
     store64(&xferi + 16, frames);  # frames-in
-    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_READI_FRAMES, &xferi);
+    var r = syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_READI_FRAMES, &xferi);
     if (r < 0) { return r; }
     return load64(&xferi);  # result field — frames-actually-read
 }
@@ -780,7 +780,7 @@ fn audio_write_bytes(dev, buf, num_bytes) {
 fn audio_get_state(dev) {
     var status[192];
     memset(&status, 0, 192);
-    var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_STATUS, &status);
+    var r = syscall(SYS_IOCTL, load64(dev), SNDRV_PCM_IOCTL_STATUS, &status);
     if (r < 0) { return 0 - 1; }
     return load64(&status);
 }

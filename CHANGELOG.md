@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-04-30
+
+Pre-1.0 release candidate. Closes the in-vani v1.0.0 work; the
+remaining v1.0.0 freeze criteria (#1 multi-hardware coverage, #2
+cyrius-doom integration tag, #3 second consumer, #4 API surface
+diff captured at freeze, #5/#6 freeze-time docs) are now external
+or release-time concerns.
+
+### Added
+
+- **aarch64 cross-build unblocked.** Migrated all `src/*.cyr`,
+  `programs/*.cyr`, `tests/tcyr/*.tcyr`, `tests/bcyr/*.bcyr` raw
+  syscall sites (73 total) to the stdlib's arch-translating
+  wrappers: `syscall(1, ...)` → `sys_write(...)` (35 sites);
+  `syscall(2, ...)` → `sys_open(...)` (3); `syscall(3, ...)` →
+  `sys_close(...)` (2); `syscall(16, ...)` → `syscall(SYS_IOCTL,
+  ...)` (20 — no stdlib wrapper, but the constant is arch-correct
+  on both peers); `syscall(60, ...)` → `sys_exit(...)` (11). The
+  two `syscall(228, ...)` (`clock_gettime`) sites in
+  `programs/throughput.cyr` and `programs/latency_test.cyr` stay
+  raw — those are real-HW measurement programs that only ever
+  build on x86_64. Same playbook yukti's 2.1.3 cut used.
+- **CI cross-build gate**: `.github/workflows/ci.yml` re-enables
+  the `Cross-build aarch64` step (was deferred at 0.3.0). The
+  release workflow ships `vani-X.Y.Z-smoke-aarch64-linux` ELF
+  alongside the x86_64 smoke binary and SHA256SUMS.
+- **API surface snapshot** at `docs/api-surface.snapshot` (106
+  public symbols across `src/alsa.cyr`, `src/buffer.cyr`,
+  `src/capture.cyr`, `src/device.cyr`, `src/error.cyr`,
+  `src/format.cyr`, `src/mixer.cyr`, `src/playback.cyr`).
+  Captures the v0.9.0 baseline that v1.0.0's freeze will diff
+  against. Format mirrors `cyrius api-surface` ("module::name/arity"
+  per line, sorted, public = `fn NAME(...)` not prefixed with `_`).
+
+### Changed
+
+- `[deps]` block adds `[deps.patra]` git override at tag `1.9.2`
+  for aarch64 portability. Cyrius 5.7.48 bundles patra 1.9.0,
+  which uses raw `SYS_OPEN` (undefined on aarch64's generic
+  syscall table — that table only exposes `SYS_OPENAT`). 1.9.2
+  migrated to stdlib `sys_open` wrappers. Removed `patra` from
+  the `stdlib = [...]` list to avoid double-resolution. Drop
+  the override once cyrius re-bundles patra ≥ 1.9.2 — same
+  trigger shape as the existing yukti override.
+
+### Verified
+
+- **Second P(-1) scaffold-hardening sweep** for v0.9.0 (audit
+  `docs/audit/2026-04-30-v0.9.0-audit.md`). Cleanliness gates,
+  test sweep (258/258), distlib diff-clean against the new
+  v0.9.0 header, bench baseline within noise of the 0.3.0
+  baseline (no syscall-wrapper overhead — calls inline or
+  DCE-strip). aarch64 cross-build now produces a valid ARM
+  ELF; verified locally before re-enabling CI.
+- All 6 silent real-HW programs (`probe`, `caps`, `throughput`,
+  `mixer_test`, `latency_test`, `devices`) PASS on the dev box
+  (HDA Generic, 8 PCM endpoints) after the syscall migration —
+  no behavioral regression.
+
 ## [0.3.0] — 2026-04-30
 
 First public release. Foundation, full HW_PARAMS / SW_PARAMS,

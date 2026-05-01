@@ -84,6 +84,10 @@ See [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib
 - **Yukti (git-pinned)** — `[deps.yukti]` at tag `2.2.1` until
   cyrius re-bundles ≥ 2.2.1 in its stdlib. Provides the audio
   enumerator surface vani's `vani_open_yukti(desc)` consumes.
+- **Patra (git-pinned)** — `[deps.patra]` at tag `1.9.2` until
+  cyrius re-bundles ≥ 1.9.2. Pinned for aarch64 portability —
+  patra 1.9.0 (cyrius-bundled) uses raw `SYS_OPEN` which is
+  undefined on aarch64. See ADR 0001 for the override pattern.
 
 `audio` is **no longer a stdlib dep** — vani owns that surface
 in-tree at `src/alsa.cyr`. `cyrius/lib/audio.cyr` retires at 5.8.0.
@@ -364,10 +368,10 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 - **Concurrency**: CI uses `cancel-in-progress: true` keyed on workflow + ref.
 - **State sync**: bump `docs/development/state.md` every release.
 
-aarch64 cross-build is currently **deferred** in CI — `src/alsa.cyr`
-needs a raw-`SYS_OPEN` → stdlib-`sys_open` migration first
-(yukti's 2.1.3 playbook). Tracked in roadmap "v0.4.x — aarch64
-unblock".
+Both x86_64 and aarch64 are first-class CI / release targets as of
+0.9.0. The cross-build step in `ci.yml` enforces a valid ARM ELF;
+release ships `vani-X.Y.Z-smoke-aarch64-linux` alongside the
+x86_64 binary.
 
 ## Docs
 
