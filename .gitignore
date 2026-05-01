@@ -7,6 +7,11 @@
 # symlink to a cyrius checkout (see CLAUDE.md "Dependency wiring").
 /lib/
 
+# Release / toolchain artifacts (CI download, test extractions)
+cyrius-*.tar.gz
+*.tar.gz
+SHA256SUMS
+
 # IDE
 .idea/
 .vscode/
