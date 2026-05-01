@@ -85,6 +85,31 @@ already; one open item before the 0.4.0 tag:
       contention reliably needs more setup than a typical
       P(-1) gate.
 
+## v0.4.x — aarch64 unblock
+
+Vani's `src/alsa.cyr` was lifted from `cyrius/lib/audio.cyr` at
+v0.1.0 and still uses raw `SYS_OPEN` / `syscall(SYS_*, ...)` ioctl
+callers that don't translate across architectures. `cyrius build
+--aarch64 programs/smoke.cyr` fails with `undefined variable
+'SYS_OPEN'` plus syscall-arity warnings. The CI workflow leaves
+the cross-build step disabled with a comment pointing here.
+
+Yukti hit the same blocker and unblocked itself in 2.1.3 by
+migrating ~30 raw callers to the stdlib's arch-translating
+`sys_open` / `sys_close` / `sys_ioctl` / `sys_unlink` wrappers.
+Same playbook here:
+
+- [ ] Inventory raw `SYS_*` and numeric `syscall()` callers in
+      `src/alsa.cyr` and `src/mixer.cyr`.
+- [ ] Replace each with the stdlib wrapper from `lib/syscalls.cyr`
+      (or upstream the wrapper if missing).
+- [ ] `cyrius build --aarch64 programs/smoke.cyr build/vani_smoke-aarch64`
+      → exit 0, file output ELF aarch64.
+- [ ] Re-enable the `Cross-build aarch64` step in
+      `.github/workflows/ci.yml` (search for the deferred comment)
+      and the matching block in `release.yml` so release archives
+      ship `vani-X.Y.Z-smoke-aarch64-linux`.
+
 ## v0.5.x — hardware coverage (HW-gated)
 
 Need access to non-onboard audio to close out v0.2.0 #6 / #7:

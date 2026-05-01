@@ -139,7 +139,7 @@ fn vani_mixer_set_volume(m, elem_name, percent) {
     var t = load32(&info + CTL_ELEM_INFO_TYPE);
     if (t != SNDRV_CTL_ELEM_TYPE_INTEGER) {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-            "element is not INTEGER-typed");
+        "element is not INTEGER-typed");
     }
     var min = load64(&info + CTL_ELEM_INFO_INTEGER_MIN);
     var max = load64(&info + CTL_ELEM_INFO_INTEGER_MAX);
@@ -176,7 +176,7 @@ fn vani_mixer_get_volume(m, elem_name) {
     var t = load32(&info + CTL_ELEM_INFO_TYPE);
     if (t != SNDRV_CTL_ELEM_TYPE_INTEGER) {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-            "element is not INTEGER-typed");
+        "element is not INTEGER-typed");
     }
     var min = load64(&info + CTL_ELEM_INFO_INTEGER_MIN);
     var max = load64(&info + CTL_ELEM_INFO_INTEGER_MAX);
@@ -215,7 +215,7 @@ fn vani_mixer_set_mute(m, elem_name, muted) {
     var t = load32(&info + CTL_ELEM_INFO_TYPE);
     if (t != SNDRV_CTL_ELEM_TYPE_BOOLEAN) {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-            "element is not BOOLEAN-typed");
+        "element is not BOOLEAN-typed");
     }
     var count = load32(&info + CTL_ELEM_INFO_COUNT);
     var alsa_value = 1;
@@ -301,7 +301,7 @@ fn vani_mixer_list_elements(m) {
     var r = syscall(16, fd, SNDRV_CTL_IOCTL_ELEM_LIST, &list);
     if (r < 0) {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-            "ELEM_LIST count pass failed");
+        "ELEM_LIST count pass failed");
     }
     var count = load32(&list + CTL_ELEM_LIST_COUNT);
     if (count == 0) {
@@ -324,7 +324,7 @@ fn vani_mixer_list_elements(m) {
     r = syscall(16, fd, SNDRV_CTL_IOCTL_ELEM_LIST, &list);
     if (r < 0) {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
-            "ELEM_LIST fill pass failed");
+        "ELEM_LIST fill pass failed");
     }
     var used = load32(&list + CTL_ELEM_LIST_USED);
 

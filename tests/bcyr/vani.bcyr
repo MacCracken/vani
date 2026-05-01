@@ -211,7 +211,7 @@ fn bench_hwp_mask_set_value() {
         var bi = 0;
         while (bi < BATCH_SIZE) {
             _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT,
-                                SND_PCM_FORMAT_S16_LE);
+            SND_PCM_FORMAT_S16_LE);
             bi = bi + 1;
         }
         bench_batch_stop(b, BATCH_SIZE);

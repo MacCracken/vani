@@ -415,7 +415,7 @@ fn _ctl_elem_id_init(eid, iface, name) {
 # `id_off`. Caller's `out_buf` must be at least 45 bytes (44 + null).
 fn _ctl_elem_id_get_name(buf_with_id, id_off, out_buf) {
     memcpy(out_buf, buf_with_id + id_off + CTL_ELEM_ID_NAME_OFF,
-           CTL_ELEM_ID_NAME_LEN);
+    CTL_ELEM_ID_NAME_LEN);
     store8(out_buf + CTL_ELEM_ID_NAME_LEN, 0);
     return out_buf;
 }
@@ -527,7 +527,7 @@ fn audio_bit_depth(dev) { return load64(dev + 24); }
 # to constrain explicitly (used by latency presets in device.cyr).
 
 fn audio_set_params_full(dev, rate, channels, bit_depth,
-                         period_frames, buffer_frames) {
+period_frames, buffer_frames) {
     if (dev == 0)       { return 0 - 1; }
     if (rate <= 0)      { return 0 - 1; }
     if (channels <= 0)  { return 0 - 1; }
@@ -539,34 +539,34 @@ fn audio_set_params_full(dev, rate, channels, bit_depth,
 
     # ACCESS = RW_INTERLEAVED. Most reliable across drivers.
     _hwp_mask_set_value(&hwp,
-        SNDRV_PCM_HW_PARAM_ACCESS,
-        SND_PCM_ACCESS_RW_INTERLEAVED);
+    SNDRV_PCM_HW_PARAM_ACCESS,
+    SND_PCM_ACCESS_RW_INTERLEAVED);
 
     # FORMAT — derived from bit_depth.
     _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
 
     # SUBFORMAT = STD. Required — leaving "any" rejects on some drivers.
     _hwp_mask_set_value(&hwp,
-        SNDRV_PCM_HW_PARAM_SUBFORMAT,
-        SND_PCM_SUBFORMAT_STD);
+    SNDRV_PCM_HW_PARAM_SUBFORMAT,
+    SND_PCM_SUBFORMAT_STD);
 
     # CHANNELS, RATE — exact. interval slot = param - FIRST_INTERVAL.
     _hwp_interval_set_exact(&hwp,
-        SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-        channels);
+    SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+    channels);
     _hwp_interval_set_exact(&hwp,
-        SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-        rate);
+    SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+    rate);
 
     if (period_frames > 0) {
         _hwp_interval_set_exact(&hwp,
-            SNDRV_PCM_HW_PARAM_PERIOD_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-            period_frames);
+        SNDRV_PCM_HW_PARAM_PERIOD_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        period_frames);
     }
     if (buffer_frames > 0) {
         _hwp_interval_set_exact(&hwp,
-            SNDRV_PCM_HW_PARAM_BUFFER_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-            buffer_frames);
+        SNDRV_PCM_HW_PARAM_BUFFER_SIZE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+        buffer_frames);
     }
 
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_PARAMS, &hwp);
@@ -658,18 +658,18 @@ fn audio_can_set_params(dev, rate, channels, bit_depth) {
     var hwp[608];
     _hwp_init_any(&hwp);
     _hwp_mask_set_value(&hwp,
-        SNDRV_PCM_HW_PARAM_ACCESS,
-        SND_PCM_ACCESS_RW_INTERLEAVED);
+    SNDRV_PCM_HW_PARAM_ACCESS,
+    SND_PCM_ACCESS_RW_INTERLEAVED);
     _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
     _hwp_mask_set_value(&hwp,
-        SNDRV_PCM_HW_PARAM_SUBFORMAT,
-        SND_PCM_SUBFORMAT_STD);
+    SNDRV_PCM_HW_PARAM_SUBFORMAT,
+    SND_PCM_SUBFORMAT_STD);
     _hwp_interval_set_exact(&hwp,
-        SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-        channels);
+    SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+    channels);
     _hwp_interval_set_exact(&hwp,
-        SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
-        rate);
+    SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,
+    rate);
     var r = syscall(16, load64(dev), SNDRV_PCM_IOCTL_HW_REFINE, &hwp);
     if (r < 0) { return 0; }
     return 1;

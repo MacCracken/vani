@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **v0.3.0 yukti integration** — `vani_open_yukti(desc)` is now a
+  thin adapter from a yukti `AudioDeviceInfo` descriptor to a
+  `VaniDevice` handle. yukti owns device identity end-to-end (card,
+  device, direction, hw_id); vani's only job is "open this endpoint
+  and wrap it." Direction is read off the descriptor — passing it
+  separately would be redundant and create a typo surface where the
+  explicit value disagrees with the descriptor's. The yukti
+  `AudioDirection` enum is bit-for-bit identical to vani's
+  `VaniDirection`, so the value passes through to the wrap helper
+  without translation. Pinned by `test_yukti_direction_matches_vani_direction`
+  (1:1 invariant) and `test_open_yukti_descriptor_accessor_projection`
+  (`AudioInfoOff` field offsets) — both break loudly if yukti
+  reshuffles the descriptor in a way that would silently mis-route.
+- `programs/devices.cyr` — yukti-driven enumeration tour: lists
+  every PCM endpoint via `yukti_audio_devices()` and runs the
+  `programs/probe.cyr` open → state → configure → state → prepare
+  → state → close sequence against the first playback descriptor
+  routed through `vani_open_yukti`. **PASS on dev box** (8 PCM
+  endpoints across cards 0/1/2 — HDA analog + HDMI + ACP capture;
+  first playback is card 1 device 0 / `pci:0000:04:00.6:dev0:p`).
+- Convenience use of yukti's filter API: consumers wanting playback-
+  only or capture-only enumeration use `yukti_audio_devices_for_direction(YUKTI_AUDIO_PLAYBACK)`
+  directly — yukti is in vani's stdlib include chain so no extra
+  import is needed, and a vani-side wrapper would just be a name
+  alias.
+
+### Changed
+
+- **Toolchain**: cyrius pin bumped 5.7.39 → 5.7.48.
+- **Dependency wiring**: yukti moved from the cyrius stdlib bundle
+  to a `[deps.yukti]` git override pinned at tag `2.2.1` (cyrius
+  5.7.48 still ships yukti 2.1.1 in its bundled `lib/`). The
+  override comment in `cyrius.cyml` notes this should be removed
+  once cyrius re-bundles yukti ≥ 2.2.1. The 2.2.1 surface adds
+  `yukti_audio_devices` + nine accessors plus the
+  `_for_direction` / `_for_card` filters and `audio_devices`
+  device_db table that v0.3.0 relies on.
+- `src/lib.cyr` now includes `lib/fs.cyr` — yukti's audio
+  enumerator uses `dir_list` to walk `/dev/snd`.
+- **Breaking** (pre-1.0): `vani_open_yukti` signature changed from
+  `(desc, direction)` → `(desc)`. The previous form was a stub
+  returning a "pending — see roadmap v0.3.0" error in every code
+  path; no real consumers existed.
+
 - Project restarted 2026-04-30 after a partial-push lost the prior tree.
 - Manifest moved from legacy `cyrius.toml` to `cyrius.cyml` (5.7.39 pin).
 - Flat `src/*.cyr` module layout matching mabda / yukti.

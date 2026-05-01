@@ -125,9 +125,9 @@ fn vani_configure(d, fmt) {
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
     var r = audio_set_params(h,
-        vani_format_rate(fmt),
-        vani_format_channels(fmt),
-        vani_format_bit_depth(fmt));
+    vani_format_rate(fmt),
+    vani_format_channels(fmt),
+    vani_format_bit_depth(fmt));
     if (r < 0) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
     }
@@ -144,10 +144,10 @@ fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
     var r = audio_set_params_full(h,
-        vani_format_rate(fmt),
-        vani_format_channels(fmt),
-        vani_format_bit_depth(fmt),
-        period_frames, buffer_frames);
+    vani_format_rate(fmt),
+    vani_format_channels(fmt),
+    vani_format_bit_depth(fmt),
+    period_frames, buffer_frames);
     if (r < 0) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
     }
@@ -158,7 +158,7 @@ fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
 fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min) {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     var r = audio_set_sw_params(vani_audio_handle(d),
-        start_threshold, stop_threshold, avail_min);
+    start_threshold, stop_threshold, avail_min);
     if (r < 0) {
         return vani_err_result(VANI_ERR_SW_PARAMS);
     }
@@ -215,9 +215,9 @@ fn vani_configure_casual(d, fmt) {
     var cres = vani_configure_buffered(d, fmt, period_frames, buffer_frames);
     if (is_ok(cres) == 0) { return cres; }
     return vani_set_sw_params(d,
-        period_frames * 2,   # start_threshold
-        buffer_frames,        # stop_threshold
-        period_frames);       # avail_min
+    period_frames * 2,   # start_threshold
+    buffer_frames,        # stop_threshold
+    period_frames);       # avail_min
 }
 
 # Suspend recovery — try resume, fall back to prepare on -ENOSYS.
@@ -259,22 +259,38 @@ fn vani_state(d) {
 # ================================================================
 # yukti integration
 # ================================================================
-# yukti returns descriptors for every audio device on the system.
-# vani_open_yukti accepts one such descriptor and routes it to the
-# right audio_open_* path. The descriptor layout is yukti's contract;
-# we treat it as opaque and only ask for card / device / direction.
+# Thin adapter: yukti enumerates audio endpoints, vani opens them.
+# Direction is part of the descriptor's identity (yukti's enumerator
+# emits one entry per (card, device, direction) tuple), so callers
+# don't pass it separately — that would be redundant and create a
+# typo surface where the explicit direction disagrees with the
+# descriptor's. The yukti `AudioDirection` enum is bit-for-bit
+# identical to vani's `VaniDirection`, so the value passes through
+# to `_vani_device_wrap` without translation.
 #
-# Until yukti.cyr exposes typed accessors for audio descriptors,
-# callers can pass the (card, device) directly via vani_open_*.
-# This wrapper is a placeholder for the typed adapter — fill in
-# once yukti's audio descriptor API stabilizes.
+# Pinned by `test_yukti_direction_matches_vani_direction` (1:1
+# encoding) and `test_open_yukti_descriptor_accessor_projection`
+# (yukti's `AudioInfoOff` field offsets) — both break loudly if
+# yukti changes the descriptor layout in a way that would silently
+# mis-route the open.
 
-fn vani_open_yukti(yukti_desc, direction) {
-    if (yukti_desc == 0) {
+fn vani_open_yukti(desc) {
+    if (desc == 0) {
         return vani_err_result(VANI_ERR_YUKTI_DESCRIPTOR);
     }
+    var card = yukti_audio_card(desc);
+    var dev  = yukti_audio_device(desc);
+    var dir  = yukti_audio_direction(desc);
+    if (dir == YUKTI_AUDIO_PLAYBACK) {
+        return _vani_device_wrap(
+        audio_open_playback(card, dev), card, dev, dir);
+    }
+    if (dir == YUKTI_AUDIO_CAPTURE) {
+        return _vani_device_wrap(
+        audio_open_capture(card, dev), card, dev, dir);
+    }
     return vani_err_result_msg(VANI_ERR_YUKTI_DESCRIPTOR,
-        "yukti audio descriptor adapter pending — see roadmap v0.3.0");
+    "yukti direction out of range");
 }
 
 # ================================================================
@@ -338,14 +354,14 @@ fn vani_format_negotiate(d, preferred) {
     var rate_slot = SNDRV_PCM_HW_PARAM_RATE     - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
 
     var ch_pick = _clamp(
-        vani_format_channels(preferred),
-        _hwp_interval_min(&hwp, ch_slot),
-        _hwp_interval_max(&hwp, ch_slot));
+    vani_format_channels(preferred),
+    _hwp_interval_min(&hwp, ch_slot),
+    _hwp_interval_max(&hwp, ch_slot));
 
     var rate_pick = _clamp(
-        vani_format_rate(preferred),
-        _hwp_interval_min(&hwp, rate_slot),
-        _hwp_interval_max(&hwp, rate_slot));
+    vani_format_rate(preferred),
+    _hwp_interval_min(&hwp, rate_slot),
+    _hwp_interval_max(&hwp, rate_slot));
 
     var fmt_pick = _negotiate_format_pick(&hwp, vani_format_alsa(preferred));
     if (fmt_pick < 0) {
@@ -362,8 +378,8 @@ fn vani_format_is_supported(d, fmt) {
     if (d == 0)   { return 0; }
     if (fmt == 0) { return 0; }
     return audio_can_set_params(
-        vani_audio_handle(d),
-        vani_format_rate(fmt),
-        vani_format_channels(fmt),
-        vani_format_bit_depth(fmt));
+    vani_audio_handle(d),
+    vani_format_rate(fmt),
+    vani_format_channels(fmt),
+    vani_format_bit_depth(fmt));
 }

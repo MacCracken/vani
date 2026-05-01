@@ -135,10 +135,10 @@ fn main() {
 
     var fail = 0;
     fail = fail + _run_preset("low-latency (10 ms × 4 = 40 ms buf)",
-                              &vani_configure_low_latency);
+    &vani_configure_low_latency);
     _puts("\n");
     fail = fail + _run_preset("casual (16 ms × 4 = 64 ms buf)",
-                              &vani_configure_casual);
+    &vani_configure_casual);
     _puts("\n");
     if (fail > 0) {
         _puts("LATENCY TEST FAIL\n");

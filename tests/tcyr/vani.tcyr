@@ -201,6 +201,71 @@ fn test_direction_constants() {
 }
 
 # ================================================================
+# v0.3.0 — yukti integration
+# ================================================================
+# vani_open_yukti is a thin adapter from yukti's AudioDeviceInfo
+# descriptor to a VaniDevice handle. These tests pin the contract
+# without touching real hardware — the routing decision (playback
+# vs capture vs invalid) and the field-extraction offsets are what
+# matter. Real-HW round-trip is exercised by programs/devices.cyr.
+
+fn test_yukti_direction_matches_vani_direction() {
+    # The 1:1 invariant. yukti's enumerator stores direction as
+    # AudioDirection ({0, 1}); vani_open_yukti passes that value
+    # straight through to _vani_device_wrap as VaniDirection. If
+    # either end re-numbers, the wrapper silently mis-stores
+    # direction in the VaniDevice handle.
+    assert_eq(YUKTI_AUDIO_PLAYBACK, VANI_PLAYBACK, "playback = 0 in both");
+    assert_eq(YUKTI_AUDIO_CAPTURE,  VANI_CAPTURE,  "capture = 1 in both");
+    return 0;
+}
+
+fn test_open_yukti_null_descriptor() {
+    var res = vani_open_yukti(0);
+    assert_eq(is_ok(res), 0, "null desc returns Err");
+    var e = payload(res);
+    assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
+    "null desc → ERR_YUKTI_DESCRIPTOR");
+    return 0;
+}
+
+fn test_open_yukti_descriptor_accessor_projection() {
+    # Pin yukti's AudioInfoOff offsets that vani_open_yukti reads.
+    # If yukti reshuffles the struct without bumping the layout
+    # contract, this trips before vani_open_yukti silently routes
+    # to the wrong card/device.
+    var d = alloc(72);
+    store64(d + 0,  3);                       # AI_CARD
+    store64(d + 8,  7);                       # AI_DEVICE
+    store64(d + 16, 0);                       # AI_SUBDEVICE
+    store64(d + 24, YUKTI_AUDIO_CAPTURE);     # AI_DIRECTION
+
+    assert_eq(yukti_audio_card(d),      3, "card at AI_CARD=0");
+    assert_eq(yukti_audio_device(d),    7, "device at AI_DEVICE=8");
+    assert_eq(yukti_audio_direction(d), YUKTI_AUDIO_CAPTURE,
+    "direction at AI_DIRECTION=24");
+    return 0;
+}
+
+fn test_open_yukti_unknown_direction() {
+    # Real yukti enumerator emits only {0, 1}; a corrupt or
+    # forward-incompatible descriptor with a sentinel direction
+    # must error rather than fall through to one of the open
+    # paths by default.
+    var d = alloc(72);
+    store64(d + 0,  0);
+    store64(d + 8,  0);
+    store64(d + 16, 0);
+    store64(d + 24, 42);   # invalid direction
+    var res = vani_open_yukti(d);
+    assert_eq(is_ok(res), 0, "invalid direction returns Err");
+    var e = payload(res);
+    assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
+    "invalid direction → ERR_YUKTI_DESCRIPTOR");
+    return 0;
+}
+
+# ================================================================
 # Audit 2026-04-30 regressions
 # ================================================================
 # Each fix lands with an assertion that would have caught the
@@ -320,7 +385,7 @@ fn test_ioctl_size_encoding_matches_struct_size() {
 }
 
 # Pin the type byte too — must be 'A' (0x41) for all SNDRV_PCM_*.
-fn test_ioctl_type_is_A() {
+fn test_ioctl_type_is_a() {
     assert_eq((SNDRV_PCM_IOCTL_HW_PARAMS     >> 8) & 255, 0x41, "HW_PARAMS");
     assert_eq((SNDRV_PCM_IOCTL_HW_REFINE     >> 8) & 255, 0x41, "HW_REFINE");
     assert_eq((SNDRV_PCM_IOCTL_PREPARE       >> 8) & 255, 0x41, "PREPARE");
@@ -384,7 +449,7 @@ fn test_ctl_ioctl_size_encoding() {
 }
 
 # Pin type byte for ctl ioctls — must be 'U' (0x55).
-fn test_ctl_ioctl_type_is_U() {
+fn test_ctl_ioctl_type_is_u() {
     assert_eq((SNDRV_CTL_IOCTL_CARD_INFO  >> 8) & 255, 0x55, "CARD_INFO");
     assert_eq((SNDRV_CTL_IOCTL_ELEM_LIST  >> 8) & 255, 0x55, "ELEM_LIST");
     assert_eq((SNDRV_CTL_IOCTL_ELEM_INFO  >> 8) & 255, 0x55, "ELEM_INFO");
@@ -431,7 +496,7 @@ fn test_ctl_elem_id_init_truncates_long_name() {
     var eid = alloc(CTL_ELEM_ID_SIZE);
     # 60-char name, deliberately exceeds the 44-byte field.
     _ctl_elem_id_init(eid, SNDRV_CTL_ELEM_IFACE_MIXER,
-        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     # Byte at offset NAME_OFF + 43 must be 0 (null terminator).
     assert_eq(load8(eid + CTL_ELEM_ID_NAME_OFF + 43), 0, "null at +43");
     # Index field at +60 must still be zero (not overwritten).
@@ -712,8 +777,8 @@ fn test_negotiate_quality_preference() {
     # _hwp_mask_set_value clears first then sets bit, so we re-set the others manually.
     var slot0 = hwp + moff;
     store32(slot0, load32(slot0)
-        | (1 << SND_PCM_FORMAT_S16_LE)
-        | (1 << SND_PCM_FORMAT_S8));
+    | (1 << SND_PCM_FORMAT_S16_LE)
+    | (1 << SND_PCM_FORMAT_S8));
     # FLOAT_LE not in mask — quality walk picks S32_LE first.
     var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_FLOAT_LE);
     assert_eq(picked, SND_PCM_FORMAT_S32_LE, "quality picks S32 over S16/S8");
@@ -753,6 +818,12 @@ fn main() {
     test_group("device");
     test_direction_constants();
 
+    test_group("yukti");
+    test_yukti_direction_matches_vani_direction();
+    test_open_yukti_null_descriptor();
+    test_open_yukti_descriptor_accessor_projection();
+    test_open_yukti_unknown_direction();
+
     test_group("audit-2026-04-30");
     test_audit_med1_card_10_not_collides_with_0();
     test_audit_med1_card_99_max_supported();
@@ -766,7 +837,7 @@ fn main() {
     test_group("hw_params");
     test_hwp_layout_constants();
     test_ioctl_size_encoding_matches_struct_size();
-    test_ioctl_type_is_A();
+    test_ioctl_type_is_a();
     test_hwp_mask_offsets();
     test_hwp_interval_offsets();
     test_hwp_init_any_fills_correctly();
@@ -794,7 +865,7 @@ fn main() {
     test_ctl_elem_info_field_offsets();
     test_ctl_elem_value_field_offsets();
     test_ctl_ioctl_size_encoding();
-    test_ctl_ioctl_type_is_U();
+    test_ctl_ioctl_type_is_u();
     test_ctl_iface_constants();
     test_ctl_elem_type_constants();
     test_ctl_elem_id_init();

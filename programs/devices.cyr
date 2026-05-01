@@ -1,0 +1,213 @@
+# programs/devices.cyr — yukti-driven audio device tour
+#
+# Two halves:
+#
+#   1. Enumerate every PCM endpoint via yukti_audio_devices() and
+#      print one line per descriptor — index, card/device,
+#      direction, name, driver, hw_id. This is the discovery side
+#      yukti owns; vani prints what yukti reports verbatim.
+#
+#   2. Find the first playback descriptor and run the same
+#      open → state → configure → state → prepare → state → close
+#      sequence as programs/probe.cyr against it, but routed
+#      through vani_open_yukti(desc) instead of vani_open_playback(
+#      card, device). If yukti's first playback descriptor matches
+#      what probe.cyr opens by hand (card 1 device 0 on this dev
+#      box), the two paths converge — that's the v0.3.0 acceptance
+#      gate.
+#
+# Real-HW only — no card means no PCM endpoints to enumerate.
+
+include "src/lib.cyr"
+
+fn _puts(s) { syscall(1, 1, s, strlen(s)); return 0; }
+fn _puterr(s) { syscall(1, 2, s, strlen(s)); return 0; }
+
+fn _puti(n) {
+    var buf[24];
+    var i = 23;
+    store8(&buf + i, 0);
+    if (n == 0) {
+        i = i - 1;
+        store8(&buf + i, 48);
+        syscall(1, 1, &buf + i, 23 - i);
+        return 0;
+    }
+    var neg = 0;
+    if (n < 0) { neg = 1; n = 0 - n; }
+    while (n > 0) {
+        i = i - 1;
+        store8(&buf + i, 48 + (n % 10));
+        n = n / 10;
+    }
+    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
+    syscall(1, 1, &buf + i, 23 - i);
+    return 0;
+}
+
+fn _put_str(s) {
+    if (s == 0) { _puts("(null)"); return 0; }
+    syscall(1, 1, str_data(s), str_len(s));
+    return 0;
+}
+
+fn _direction_label(dir) {
+    if (dir == YUKTI_AUDIO_PLAYBACK) { return "playback"; }
+    if (dir == YUKTI_AUDIO_CAPTURE)  { return "capture"; }
+    return "unknown";
+}
+
+fn _state_name(s) {
+    if (s == SND_PCM_STATE_OPEN)      { return "OPEN"; }
+    if (s == SND_PCM_STATE_SETUP)     { return "SETUP"; }
+    if (s == SND_PCM_STATE_PREPARED)  { return "PREPARED"; }
+    if (s == SND_PCM_STATE_RUNNING)   { return "RUNNING"; }
+    if (s == SND_PCM_STATE_XRUN)      { return "XRUN"; }
+    if (s == SND_PCM_STATE_DRAINING)  { return "DRAINING"; }
+    if (s == SND_PCM_STATE_PAUSED)    { return "PAUSED"; }
+    if (s == SND_PCM_STATE_SUSPENDED) { return "SUSPENDED"; }
+    return "UNKNOWN";
+}
+
+fn _print_entry(idx, desc) {
+    _puts("  [");
+    _puti(idx);
+    _puts("] card=");
+    _puti(yukti_audio_card(desc));
+    _puts(" device=");
+    _puti(yukti_audio_device(desc));
+    _puts(" sub=");
+    _puti(yukti_audio_subdevice(desc));
+    _puts(" dir=");
+    _puts(_direction_label(yukti_audio_direction(desc)));
+    _puts(" driver=");
+    _put_str(yukti_audio_driver(desc));
+    _puts(" name=");
+    _put_str(yukti_audio_name(desc));
+    _puts(" hw_id=");
+    _put_str(yukti_audio_hw_id(desc));
+    _puts("\n");
+    return 0;
+}
+
+# Walk a yukti vec of descriptors and return the first playback
+# entry, or 0 if none.
+fn _first_playback(devs) {
+    var n = vec_len(devs);
+    for (var i = 0; i < n; i = i + 1) {
+        var d = vec_get(devs, i);
+        if (yukti_audio_direction(d) == YUKTI_AUDIO_PLAYBACK) {
+            return d;
+        }
+    }
+    return 0;
+}
+
+fn _probe_via_yukti(desc) {
+    _puts("\nopening first playback descriptor via vani_open_yukti\n");
+
+    var res = vani_open_yukti(desc);
+    if (is_ok(res) == 0) {
+        _puts("  open: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(res)));
+        _puts("\n");
+        return 1;
+    }
+    var d = payload(res);
+    _puts("  open: OK fd=");
+    _puti(audio_fd(vani_audio_handle(d)));
+    _puts("\n");
+
+    var st0 = vani_state(d);
+    _puts("  state-after-open: ");
+    _puti(st0);
+    _puts(" (");
+    _puts(_state_name(st0));
+    _puts(")\n");
+    if (st0 != SND_PCM_STATE_OPEN) {
+        _puts("  unexpected initial state\n");
+        vani_close(d);
+        return 1;
+    }
+
+    var fmt = vani_format_default();
+    var cres = vani_configure(d, fmt);
+    if (is_ok(cres) == 0) {
+        _puts("  configure: FAIL\n");
+        vani_close(d);
+        return 1;
+    }
+    _puts("  configure: rate=");
+    _puti(vani_format_rate(fmt));
+    _puts(" ch=");
+    _puti(vani_format_channels(fmt));
+    _puts(" bits=");
+    _puti(vani_format_bit_depth(fmt));
+    _puts("\n");
+
+    var st1 = vani_state(d);
+    _puts("  state-after-configure: ");
+    _puts(_state_name(st1));
+    _puts("\n");
+    if (st1 != SND_PCM_STATE_SETUP) {
+        _puts("  expected SETUP after HW_PARAMS\n");
+        vani_close(d);
+        return 1;
+    }
+
+    var pres = vani_prepare(d);
+    if (is_ok(pres) == 0) {
+        _puts("  prepare: FAIL — ");
+        vani_err_print_name(vani_err_code(payload(pres)));
+        _puts("\n");
+        vani_close(d);
+        return 1;
+    }
+    var st2 = vani_state(d);
+    _puts("  state-after-prepare: ");
+    _puts(_state_name(st2));
+    _puts("\n");
+    if (st2 != SND_PCM_STATE_PREPARED) {
+        _puts("  expected PREPARED after PREPARE\n");
+        vani_close(d);
+        return 1;
+    }
+
+    vani_close(d);
+    _puts("  close: OK\n");
+    _puts("DEVICES PASS — yukti descriptor → vani_open_yukti round-trip on real hardware\n");
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani devices — yukti enumeration + open round-trip\n");
+
+    var devs = yukti_audio_devices();
+    if (devs == 0) {
+        _puterr("yukti_audio_devices() returned 0 — fs or /dev/snd issue\n");
+        return 1;
+    }
+    var n = vec_len(devs);
+    _puts("found ");
+    _puti(n);
+    _puts(" PCM endpoint(s)\n");
+    if (n == 0) {
+        _puts("(no audio devices on this host — bailing without an open round-trip)\n");
+        return 0;
+    }
+
+    for (var i = 0; i < n; i = i + 1) {
+        _print_entry(i, vec_get(devs, i));
+    }
+
+    var pb = _first_playback(devs);
+    if (pb == 0) {
+        _puts("\n(no playback endpoints — skipping vani_open_yukti round-trip)\n");
+        return 0;
+    }
+    return _probe_via_yukti(pb);
+}
+
+var ec = main();
+syscall(60, ec);
