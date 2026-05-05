@@ -5,7 +5,7 @@ description = "vani — audio device I/O for Cyrius. The voice of the system."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/vani"
 language = "cyrius"
-cyrius = "5.7.48"
+cyrius = "5.8.64"
 
 # vani is a library — no CLI binary. `cyrius build` targets a smoke
 # program that links the full include chain to prove lib.cyr parses
@@ -79,7 +79,7 @@ stdlib = [
 # this override once cyrius re-bundles yukti ≥ 2.2.1.
 [deps.yukti]
 git = "https://github.com/MacCracken/yukti.git"
-tag = "2.2.1"
+tag = "2.2.2"
 modules = ["dist/yukti.cyr"]
 
 # patra — pinned at 1.9.2 for aarch64 portability. Cyrius 5.7.48
@@ -89,5 +89,5 @@ modules = ["dist/yukti.cyr"]
 # patra dep. Drop this override once cyrius re-bundles patra ≥ 1.9.2.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.9.2"
+tag = "1.9.3"
 modules = ["dist/patra.cyr"]

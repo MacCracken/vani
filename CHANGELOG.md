@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-05-05
+
+### Changed
+
+- `cyrius` pin bumped 5.7.48 → 5.8.64 ahead of the cyrius v5.8.65
+  stdlib foldin. Vani is on the foldin manifest; this patch is
+  the prerequisite for cyrius's `[deps].vani.tag` to point at
+  0.9.2 in the foldin slot.
+- `[deps.yukti].tag` bumped 2.2.1 → 2.2.2 (latest);
+  `[deps.patra].tag` bumped 1.9.2 → 1.9.3 (latest). Aligns vani
+  with the cyrius-side pin set heading into the foldin.
+- No source changes — pure pin + version bump.
+
+### Verified
+
+- `cyrius test`: **258 / 258** asserts pass against cyrius 5.8.64
+  with yukti 2.2.2 + patra 1.9.3 resolved.
+- `cyrius fmt --check`: clean across all source.
+
 ## [0.9.1] — 2026-05-01
 
 Audio-core distribution profile. Driven by cyrius-doom's
