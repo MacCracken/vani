@@ -17,7 +17,7 @@
 # vani_play writes `frames` interleaved frames from `buf`. Returns a
 # Result of frames-actually-written (may be < frames on partial write).
 
-fn vani_play(d, buf, frames) {
+fn vani_play(d, buf, frames): i64 {
     if (d == 0)         { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (buf == 0)       { return vani_err_result(VANI_ERR_WRITE); }
     if (frames <= 0)    { return vani_ok(0); }
@@ -55,7 +55,7 @@ fn vani_play(d, buf, frames) {
 # shot. Returns Result(frames_written). Caller loops until
 # vani_ring_used(rb) drops below one frame's worth of bytes.
 
-fn vani_play_from_ring(d, rb) {
+fn vani_play_from_ring(d, rb): i64 {
     if (d == 0)  { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (rb == 0) { return vani_err_result(VANI_ERR_WRITE); }
     var fmt = vani_format_get(d);

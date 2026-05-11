@@ -11,7 +11,7 @@
 # Reads up to `frames` interleaved frames into `buf`. Returns
 # Result(frames_actually_read).
 
-fn vani_record(d, buf, frames) {
+fn vani_record(d, buf, frames): i64 {
     if (d == 0)        { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (buf == 0)      { return vani_err_result(VANI_ERR_READ); }
     if (frames <= 0)   { return vani_ok(0); }
@@ -46,7 +46,7 @@ fn vani_record(d, buf, frames) {
 # Reads up to `frames` and pushes the bytes into rb. Returns
 # Result(frames_actually_pushed) — may be short if the ring fills.
 
-fn vani_record_to_ring(d, rb, frames) {
+fn vani_record_to_ring(d, rb, frames): i64 {
     if (d == 0)  { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (rb == 0) { return vani_err_result(VANI_ERR_READ); }
     var fmt = vani_format_get(d);

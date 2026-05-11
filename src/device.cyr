@@ -36,7 +36,7 @@ enum VaniState {
     VANI_STATE_UNKNOWN   = 99;
 }
 
-fn vani_state_name(s) {
+fn vani_state_name(s): i64 {
     if (s == VANI_STATE_OPEN)      { return "OPEN"; }
     if (s == VANI_STATE_SETUP)     { return "SETUP"; }
     if (s == VANI_STATE_PREPARED)  { return "PREPARED"; }
@@ -50,13 +50,13 @@ fn vani_state_name(s) {
 
 # Map a raw audio_get_state result (kernel int, possibly -1) into
 # the typed enum. Anything outside [0, 7] becomes VANI_STATE_UNKNOWN.
-fn vani_state_from_raw(raw) {
+fn vani_state_from_raw(raw): i64 {
     if (raw < 0) { return VANI_STATE_UNKNOWN; }
     if (raw > 7) { return VANI_STATE_UNKNOWN; }
     return raw;
 }
 
-fn vani_state_typed(d) {
+fn vani_state_typed(d): i64 {
     return vani_state_from_raw(audio_get_state(vani_audio_handle(d)));
 }
 
@@ -64,7 +64,7 @@ fn vani_state_typed(d) {
 # Open / close
 # ================================================================
 
-fn _vani_device_wrap(audio_h, card, device, direction) {
+fn _vani_device_wrap(audio_h, card, device, direction): i64 {
     if (audio_h == 0) {
         return vani_err_result(VANI_ERR_DEVICE_OPEN);
     }
@@ -78,19 +78,19 @@ fn _vani_device_wrap(audio_h, card, device, direction) {
     return vani_ok(d);
 }
 
-fn vani_open_playback(card, device) {
+fn vani_open_playback(card, device): i64 {
     var h = audio_open_playback(card, device);
     return _vani_device_wrap(h, card, device, VANI_PLAYBACK);
 }
 
-fn vani_open_capture(card, device) {
+fn vani_open_capture(card, device): i64 {
     var h = audio_open_capture(card, device);
     return _vani_device_wrap(h, card, device, VANI_CAPTURE);
 }
 
 # Close releases the underlying audio handle and the VaniDevice
 # wrapper. Always returns 0 — close is best-effort.
-fn vani_close(d) {
+fn vani_close(d): i64 {
     if (d == 0) { return 0; }
     var h = load64(d);
     if (h != 0) { audio_close(h); }
@@ -101,14 +101,14 @@ fn vani_close(d) {
 # Accessors
 # ================================================================
 
-fn vani_audio_handle(d) { return load64(d); }
-fn vani_card(d)         { return load64(d + 8); }
-fn vani_device_id(d)    { return load64(d + 16); }
-fn vani_format_get(d)   { return load64(d + 24); }
-fn vani_direction(d)    { return load64(d + 32); }
-fn vani_xrun_count(d)   { return load64(d + 40); }
+fn vani_audio_handle(d): i64 { return load64(d); }
+fn vani_card(d): i64 { return load64(d + 8); }
+fn vani_device_id(d): i64 { return load64(d + 16); }
+fn vani_format_get(d): i64 { return load64(d + 24); }
+fn vani_direction(d): i64 { return load64(d + 32); }
+fn vani_xrun_count(d): i64 { return load64(d + 40); }
 
-fn vani_xrun_inc(d) {
+fn vani_xrun_inc(d): i64 {
     store64(d + 40, vani_xrun_count(d) + 1);
     return 0;
 }
@@ -120,7 +120,7 @@ fn vani_xrun_inc(d) {
 # struct yet); when stdlib gains the full negotiation ioctl this
 # function picks it up without API changes.
 
-fn vani_configure(d, fmt) {
+fn vani_configure(d, fmt): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
@@ -139,7 +139,7 @@ fn vani_configure(d, fmt) {
 # `period_frames=0` / `buffer_frames=0` leaves those "any". Used
 # by the latency presets below; consumers can also call directly
 # for fine-grained control.
-fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
+fn vani_configure_buffered(d, fmt, period_frames, buffer_frames): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
@@ -155,7 +155,7 @@ fn vani_configure_buffered(d, fmt, period_frames, buffer_frames) {
     return vani_ok(d);
 }
 
-fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min) {
+fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min): i64 {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     var r = audio_set_sw_params(vani_audio_handle(d),
     start_threshold, stop_threshold, avail_min);
@@ -182,14 +182,14 @@ fn vani_set_sw_params(d, start_threshold, stop_threshold, avail_min) {
 # typically require period_size to be a multiple of a hardware grain
 # (often 32 or 64); 16 is the conservative minimum. Reduces "kernel
 # rejected our HW_PARAMS" surprises across HDA / USB / HDMI codecs.
-fn _vani_round_period(frames) {
+fn _vani_round_period(frames): i64 {
     if (frames < 16) { return 16; }
     var rem = frames & 15;  # frames % 16
     if (rem == 0) { return frames; }
     return frames + (16 - rem);
 }
 
-fn vani_configure_low_latency(d, fmt) {
+fn vani_configure_low_latency(d, fmt): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var rate = vani_format_rate(fmt);
@@ -206,7 +206,7 @@ fn vani_configure_low_latency(d, fmt) {
     return vani_set_sw_params(d, 1, buffer_frames, period_frames);
 }
 
-fn vani_configure_casual(d, fmt) {
+fn vani_configure_casual(d, fmt): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var rate = vani_format_rate(fmt);
@@ -221,7 +221,7 @@ fn vani_configure_casual(d, fmt) {
 }
 
 # Suspend recovery — try resume, fall back to prepare on -ENOSYS.
-fn vani_resume(d) {
+fn vani_resume(d): i64 {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     var h = vani_audio_handle(d);
     var r = audio_resume(h);
@@ -232,27 +232,27 @@ fn vani_resume(d) {
     return vani_ok(d);
 }
 
-fn vani_prepare(d) {
+fn vani_prepare(d): i64 {
     var r = audio_prepare(vani_audio_handle(d));
     if (r < 0) { return vani_err_result(VANI_ERR_PREPARE); }
     return vani_ok(d);
 }
 
-fn vani_start(d) {
+fn vani_start(d): i64 {
     var r = audio_start(vani_audio_handle(d));
     if (r < 0) { return vani_err_result(VANI_ERR_START); }
     return vani_ok(d);
 }
 
-fn vani_drain(d) {
+fn vani_drain(d): i64 {
     return audio_drain(vani_audio_handle(d));
 }
 
-fn vani_drop(d) {
+fn vani_drop(d): i64 {
     return audio_drop(vani_audio_handle(d));
 }
 
-fn vani_state(d) {
+fn vani_state(d): i64 {
     return audio_get_state(vani_audio_handle(d));
 }
 
@@ -274,7 +274,7 @@ fn vani_state(d) {
 # yukti changes the descriptor layout in a way that would silently
 # mis-route the open.
 
-fn vani_open_yukti(desc) {
+fn vani_open_yukti(desc): i64 {
     if (desc == 0) {
         return vani_err_result(VANI_ERR_YUKTI_DESCRIPTOR);
     }
@@ -311,7 +311,7 @@ fn vani_open_yukti(desc) {
 #
 # Cheap (one ioctl, one alloc). Doesn't recurse / iterate.
 
-fn _negotiate_format_pick(hwp, preferred_fmt) {
+fn _negotiate_format_pick(hwp, preferred_fmt): i64 {
     var fmt_mask_idx = SNDRV_PCM_HW_PARAM_FORMAT;
     if (_hwp_mask_has_bit(hwp, fmt_mask_idx, preferred_fmt) == 1) {
         return preferred_fmt;
@@ -334,13 +334,13 @@ fn _negotiate_format_pick(hwp, preferred_fmt) {
     return 0 - 1;
 }
 
-fn _clamp(value, lo, hi) {
+fn _clamp(value, lo, hi): i64 {
     if (value < lo) { return lo; }
     if (value > hi) { return hi; }
     return value;
 }
 
-fn vani_format_negotiate(d, preferred) {
+fn vani_format_negotiate(d, preferred): i64 {
     if (d == 0)         { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (preferred == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
 
@@ -374,7 +374,7 @@ fn vani_format_negotiate(d, preferred) {
 
 # Convenience: query whether an exact format is supported on this
 # device. Returns 1 yes, 0 no.
-fn vani_format_is_supported(d, fmt) {
+fn vani_format_is_supported(d, fmt): i64 {
     if (d == 0)   { return 0; }
     if (fmt == 0) { return 0; }
     return audio_can_set_params(

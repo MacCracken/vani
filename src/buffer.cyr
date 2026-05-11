@@ -31,7 +31,7 @@ enum BufferBounds {
     VANI_RING_MAX_BYTES = 1073741824;  # 1 GiB
 }
 
-fn _next_pow2(n) {
+fn _next_pow2(n): i64 {
     if (n <= 0)                   { return 0; }
     if (n > VANI_RING_MAX_BYTES)  { return 0; }
     var p = 1;
@@ -39,7 +39,7 @@ fn _next_pow2(n) {
     return p;
 }
 
-fn vani_ring_new(capacity) {
+fn vani_ring_new(capacity): i64 {
     if (capacity <= 0)                  { return 0; }
     if (capacity > VANI_RING_MAX_BYTES) { return 0; }
     var sz = _next_pow2(capacity);
@@ -53,35 +53,35 @@ fn vani_ring_new(capacity) {
     return rb;
 }
 
-fn vani_ring_buf(rb)   { return load64(rb); }
-fn vani_ring_size(rb)  { return load64(rb + 8); }
-fn vani_ring_mask(rb)  { return load64(rb + 16); }
-fn vani_ring_wpos(rb)  { return load64(rb + 24); }
-fn vani_ring_rpos(rb)  { return load64(rb + 32); }
+fn vani_ring_buf(rb): i64 { return load64(rb); }
+fn vani_ring_size(rb): i64 { return load64(rb + 8); }
+fn vani_ring_mask(rb): i64 { return load64(rb + 16); }
+fn vani_ring_wpos(rb): i64 { return load64(rb + 24); }
+fn vani_ring_rpos(rb): i64 { return load64(rb + 32); }
 
 # ================================================================
 # Occupancy queries
 # ================================================================
 
-fn vani_ring_used(rb) {
+fn vani_ring_used(rb): i64 {
     return vani_ring_wpos(rb) - vani_ring_rpos(rb);
 }
 
-fn vani_ring_free(rb) {
+fn vani_ring_free(rb): i64 {
     return vani_ring_size(rb) - vani_ring_used(rb);
 }
 
-fn vani_ring_is_empty(rb) {
+fn vani_ring_is_empty(rb): i64 {
     if (vani_ring_used(rb) == 0) { return 1; }
     return 0;
 }
 
-fn vani_ring_is_full(rb) {
+fn vani_ring_is_full(rb): i64 {
     if (vani_ring_used(rb) == vani_ring_size(rb)) { return 1; }
     return 0;
 }
 
-fn vani_ring_reset(rb) {
+fn vani_ring_reset(rb): i64 {
     store64(rb + 24, 0);
     store64(rb + 32, 0);
     return 0;
@@ -93,7 +93,7 @@ fn vani_ring_reset(rb) {
 # Both copy as many bytes as fit / are available and return the byte
 # count actually moved. Short reads/writes are normal — caller loops.
 
-fn vani_ring_write(rb, src, n) {
+fn vani_ring_write(rb, src, n): i64 {
     var avail = vani_ring_free(rb);
     if (n > avail) { n = avail; }
     if (n <= 0) { return 0; }
@@ -110,7 +110,7 @@ fn vani_ring_write(rb, src, n) {
     return n;
 }
 
-fn vani_ring_read(rb, dst, n) {
+fn vani_ring_read(rb, dst, n): i64 {
     var avail = vani_ring_used(rb);
     if (n > avail) { n = avail; }
     if (n <= 0) { return 0; }

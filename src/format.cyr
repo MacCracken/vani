@@ -40,7 +40,7 @@ enum VaniRate {
 #   +24: alsa_fmt   — AlsaFormat enum value
 # ================================================================
 
-fn vani_format_new(rate, channels, bit_depth, alsa_fmt) {
+fn vani_format_new(rate, channels, bit_depth, alsa_fmt): i64 {
     var f = alloc(32);
     store64(f, rate);
     store64(f + 8, channels);
@@ -50,19 +50,19 @@ fn vani_format_new(rate, channels, bit_depth, alsa_fmt) {
 }
 
 # Sensible defaults: 48 kHz stereo S16_LE — the universal baseline.
-fn vani_format_default() {
+fn vani_format_default(): i64 {
     return vani_format_new(VANI_RATE_48K, 2, 16, SND_PCM_FORMAT_S16_LE);
 }
 
 # CD-quality: 44.1 kHz stereo S16_LE.
-fn vani_format_cd() {
+fn vani_format_cd(): i64 {
     return vani_format_new(VANI_RATE_44K, 2, 16, SND_PCM_FORMAT_S16_LE);
 }
 
-fn vani_format_rate(f)      { return load64(f); }
-fn vani_format_channels(f)  { return load64(f + 8); }
-fn vani_format_bit_depth(f) { return load64(f + 16); }
-fn vani_format_alsa(f)      { return load64(f + 24); }
+fn vani_format_rate(f): i64 { return load64(f); }
+fn vani_format_channels(f): i64 { return load64(f + 8); }
+fn vani_format_bit_depth(f): i64 { return load64(f + 16); }
+fn vani_format_alsa(f): i64 { return load64(f + 24); }
 
 # ================================================================
 # Frame / byte math
@@ -71,7 +71,7 @@ fn vani_format_alsa(f)      { return load64(f + 24); }
 # bytes_per_frame = channels * bytes_per_sample. S24_LE is the
 # awkward one: 24 bits of signal in 32 bits of storage.
 
-fn vani_bytes_per_sample(alsa_fmt) {
+fn vani_bytes_per_sample(alsa_fmt): i64 {
     if (alsa_fmt == SND_PCM_FORMAT_S8)       { return 1; }
     if (alsa_fmt == SND_PCM_FORMAT_U8)       { return 1; }
     if (alsa_fmt == SND_PCM_FORMAT_S16_LE)   { return 2; }
@@ -82,24 +82,24 @@ fn vani_bytes_per_sample(alsa_fmt) {
     return 0;
 }
 
-fn vani_bytes_per_frame(f) {
+fn vani_bytes_per_frame(f): i64 {
     var bps = vani_bytes_per_sample(vani_format_alsa(f));
     return vani_format_channels(f) * bps;
 }
 
 # Frames-to-bytes / bytes-to-frames at the configured format.
-fn vani_frames_to_bytes(f, frames) {
+fn vani_frames_to_bytes(f, frames): i64 {
     return frames * vani_bytes_per_frame(f);
 }
 
-fn vani_bytes_to_frames(f, bytes) {
+fn vani_bytes_to_frames(f, bytes): i64 {
     var bpf = vani_bytes_per_frame(f);
     if (bpf == 0) { return 0; }
     return bytes / bpf;
 }
 
 # Latency in milliseconds → frame count at this format's rate.
-fn vani_ms_to_frames(f, ms) {
+fn vani_ms_to_frames(f, ms): i64 {
     return (vani_format_rate(f) * ms) / 1000;
 }
 
@@ -110,7 +110,7 @@ fn vani_ms_to_frames(f, ms) {
 # Callers that need explicit endian should use the AlsaFormat enum
 # directly.
 
-fn vani_alsa_for(bit_depth, signed) {
+fn vani_alsa_for(bit_depth, signed): i64 {
     if (bit_depth == 8) {
         if (signed == 1) { return SND_PCM_FORMAT_S8; }
         return SND_PCM_FORMAT_U8;
