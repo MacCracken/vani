@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-05-11
+
+### Changed
+
+- **Stdlib annotation pass**: every public fn in `src/*.cyr`
+  carries a `: i64` return-type annotation. Same shape as
+  cyrius's own v5.11.x annotation arc (Phases 1-6 in
+  cyrius/CHANGELOG.md). Annotations are parse-only — zero
+  runtime / codegen change.
+- `cyrius` pin bumped 5.8.64 → 5.11.4 — required because
+  the annotation syntax (`: i64` return types) needs the
+  v5.10.x REAL TYPE SYSTEM arc.
+- `dist/vani.cyr` regenerated via `cyrius distlib` (2072 lines
+  at v0.9.3). Ready for the next cyrius-side fold-in slot.
+
+### Verified
+
+- `cyrius build programs/smoke.cyr build/vani_smoke`: green.
+- Dead-code report unchanged (annotations don't alter call graph).
+
 ## [0.9.2] — 2026-05-05
 
 ### Changed
