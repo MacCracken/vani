@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cyrius` pin bumped 5.11.4 → 6.0.1.
 - `[deps.yukti]` pin bumped 2.2.2 → 2.2.4.
 - `[deps.patra]` pin bumped 1.9.3 → 1.9.5.
+- CI / release workflows: `cc5_aarch64` → `cycc_aarch64` (named
+  compiler renamed in Cyrius 6.0). Same pattern agnosys carries.
+  Cyrius 6.0.1 tarball ships only `cycc_aarch64`; the old name
+  would have hard-failed the aarch64 cross-build step.
 
 ## [0.9.3] — 2026-05-11
 
