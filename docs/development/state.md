@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `0.9.1` (pre-1.0 release candidate, audio-core profile) |
-| Released | 2026-05-01 |
-| Cyrius toolchain pin | `5.7.48` |
-| Yukti pin (`[deps.yukti]`) | tag `2.2.1` (git override until cyrius re-bundles ≥ 2.2.1) |
-| Patra pin (`[deps.patra]`) | tag `1.9.2` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.9.2) |
+| Current version | `0.9.4` (pre-1.0 release candidate, audio-core profile) |
+| Released | 2026-05-21 |
+| Cyrius toolchain pin | `6.0.1` |
+| Yukti pin (`[deps.yukti]`) | tag `2.2.4` (git override until cyrius re-bundles ≥ 2.2.4) |
+| Patra pin (`[deps.patra]`) | tag `1.9.5` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.9.5) |
 | Distribution profiles | full (`dist/vani.cyr`, 76 KB / 106 symbols) and core (`dist/vani-core.cyr`, 29 KB / 22 symbols) |
 | Latest P(-1) audit | [`docs/audit/2026-05-01-v0.9.1-audit.md`](../audit/2026-05-01-v0.9.1-audit.md) |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0) |
@@ -77,6 +77,8 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `0.9.4` | 2026-05-21 | `cyrius` toolchain pin bumped 5.11.4 → 6.0.1. `[deps.yukti]` bumped 2.2.2 → 2.2.4, `[deps.patra]` bumped 1.9.3 → 1.9.5. |
+| `0.9.3` | 2026-05-11 | Stdlib annotation pass — every public fn in `src/*.cyr` carries a `: i64` return-type annotation (parse-only). `cyrius` pin bumped 5.8.64 → 5.11.4 for the v5.10.x type-system arc. |
 | `0.9.1` | 2026-05-01 | `core` distribution profile added. `cyrius distlib core` → `dist/vani-core.cyr` (29 KB, 22 symbols, 62% smaller than full). Drives the cyrius-doom audio-core consumer story without touching the full bundle or the public API. |
 | `0.9.0` | 2026-04-30 | Pre-1.0 release candidate. aarch64 cross-build unblocked (73-site syscall migration); CI/release ships `vani-0.9.0-smoke-aarch64-linux`; `[deps.patra]` git-pinned at 1.9.2; API surface baseline captured at `docs/api-surface.snapshot`. |
 | `0.3.0` | 2026-04-30 | First public release. Foundation through yukti integration; rolls up the v0.1.0 / v0.2.0 / v0.3.0 development milestones. |
@@ -86,14 +88,14 @@
 Vani depends on:
 
 ```
-cyrius (5.7.48)
+cyrius (6.0.1)
   ├─ stdlib (15 modules: syscalls / string / alloc / str / fmt /
   │        vec / io / fs / args / hashmap / tagged / fnptr /
   │        freelist / process / sakshi)
-  ├─ [deps.yukti] (git tag 2.2.1) — pinned ahead of cyrius's bundled
-  │                                  yukti 2.1.1 until rebundle.
-  └─ [deps.patra] (git tag 1.9.2) — pinned ahead of cyrius's bundled
-                                     patra 1.9.0 for aarch64
+  ├─ [deps.yukti] (git tag 2.2.4) — pinned ahead of cyrius's bundled
+  │                                  yukti until rebundle.
+  └─ [deps.patra] (git tag 1.9.5) — pinned ahead of cyrius's bundled
+                                     patra for aarch64
                                      portability; until rebundle.
 ```
 
