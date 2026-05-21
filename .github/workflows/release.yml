@@ -148,6 +148,18 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           awk "/^## \\[${TAG}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
+      - name: Drop empty cyrius.lock
+        # Cyrius 6.0.1 deps bug (see ci.yml / release.yml verify step):
+        # `cyrius deps` truncates cyrius.lock to 0 bytes. softprops
+        # treats a 0-byte upload as a failure and fails the whole
+        # step, even after every other asset succeeded. Skip the
+        # lockfile while empty; restore unconditional include once
+        # the cu fix lands.
+        run: |
+          if [ ! -s cyrius.lock ]; then
+            echo "::warning::cyrius.lock empty — excluding from release assets (Cyrius 6.0.1 deps bug)"
+            rm -f cyrius.lock
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           name: "vani ${{ github.ref_name }}"
