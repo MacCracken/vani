@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler renamed in Cyrius 6.0). Same pattern agnosys carries.
   Cyrius 6.0.1 tarball ships only `cycc_aarch64`; the old name
   would have hard-failed the aarch64 cross-build step.
+- CI / release `cyrius deps --verify` made conditional on a
+  non-empty `cyrius.lock` (Cyrius 6.0.1 deps bug: `cyrius deps`
+  reports "N deps resolved" but truncates the lockfile to 0 bytes,
+  then `--verify` bails with "no cyrius.lock found"). Pattern
+  matches agnosys / patra workaround. Restore unconditional verify
+  once cu fix lands.
+
+### Verified
+
+- `cyrius lint`: 0 warnings.
+- `cyrius fmt`: diff-clean across `src/`, `programs/`, `tests/`.
+- `cyrius vet programs/smoke.cyr`: 1 dep, 0 untrusted, 0 missing.
+- `cyrius build programs/smoke.cyr` (DCE): 457,296 B x86_64 ELF.
+- Aarch64 cross-build (`cycc_aarch64`): clean.
+- `cyrius test tests/tcyr/vani.tcyr`: 258 / 258 pass.
+- `cyrius bench tests/bcyr/vani.bcyr`: appended row to
+  `bench-history.csv` (commit `59dd681`). No regression vs. prior
+  baselines (e.g. `ring_200ms_playback` 82,958 ns vs. 80,616 ns at
+  `f884617` — within noise floor).
+- `cyrius distlib` + `cyrius distlib core`: `dist/vani.cyr` 2072
+  lines, `dist/vani-core.cyr` 791 lines (v0.9.4 headers).
 
 ## [0.9.3] — 2026-05-11
 
