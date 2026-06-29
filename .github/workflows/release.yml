@@ -58,14 +58,10 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # Skip when cyrius.lock is empty (Cyrius 6.0.1 deps bug — see
-        # ci.yml comment). Restore once the cu fix lands.
-        run: |
-          if [ -s cyrius.lock ]; then
-            cyrius deps --verify
-          else
-            echo "::warning::cyrius.lock empty — skipping hash verification (Cyrius 6.0.1 deps bug)"
-          fi
+        # Enforces lockfile hash integrity for the git-pinned deps.
+        # (Cyrius 6.0.1 lockfile-truncation workaround removed at vani
+        # 0.9.6 — fixed since the 6.3.5 pin.)
+        run: cyrius deps --verify
 
       - name: Build smoke (DCE) — x86_64
         run: |
@@ -148,18 +144,6 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           awk "/^## \\[${TAG}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md > /tmp/body.md
-      - name: Drop empty cyrius.lock
-        # Cyrius 6.0.1 deps bug (see ci.yml / release.yml verify step):
-        # `cyrius deps` truncates cyrius.lock to 0 bytes. softprops
-        # treats a 0-byte upload as a failure and fails the whole
-        # step, even after every other asset succeeded. Skip the
-        # lockfile while empty; restore unconditional include once
-        # the cu fix lands.
-        run: |
-          if [ ! -s cyrius.lock ]; then
-            echo "::warning::cyrius.lock empty — excluding from release assets (Cyrius 6.0.1 deps bug)"
-            rm -f cyrius.lock
-          fi
       - uses: softprops/action-gh-release@v2
         with:
           name: "vani ${{ github.ref_name }}"

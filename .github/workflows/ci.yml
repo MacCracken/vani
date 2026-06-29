@@ -66,17 +66,12 @@ jobs:
         run: cyrius deps
 
       - name: Verify dep hashes
-        # Skip when cyrius.lock is empty (Cyrius 6.0.1 bug: `cyrius deps`
-        # reports "N deps resolved" but writes 0 entries to the lockfile,
-        # then `--verify` bails with "no cyrius.lock found"). Restore
-        # enforcement once the cu fix lands. Same workaround pattern
-        # agnosys / patra carry.
-        run: |
-          if [ -s cyrius.lock ]; then
-            cyrius deps --verify
-          else
-            echo "::warning::cyrius.lock empty — skipping hash verification (Cyrius 6.0.1 deps bug)"
-          fi
+        # Enforces lockfile hash integrity for the git-pinned deps.
+        # The Cyrius 6.0.1 lockfile-truncation workaround (conditional
+        # skip on an empty lock) was removed at vani 0.9.6 — the bug is
+        # fixed since the 6.3.5 toolchain pin: `cyrius deps` writes a
+        # full lock and `cyrius deps --verify` passes.
+        run: cyrius deps --verify
 
       - name: Lint
         # Auto-discover so new modules are covered without editing CI.

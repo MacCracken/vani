@@ -34,10 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compile error**. Without `chrono`, the yukti bump would fail the build
   outright. vani's own `src/*.cyr` call no chrono symbols — the dependency is
   purely transitive via yukti.
+- **Restored unconditional `cyrius deps --verify` in CI and release.** The
+  Cyrius 6.0.1 lockfile-truncation workaround — skip hash verification when
+  `cyrius.lock` is empty (`ci.yml`, `release.yml`) and drop the empty lock from
+  release assets (`release.yml` "Drop empty cyrius.lock" step) — is removed now
+  that the 6.3.5 toolchain writes a full lock. Reproduced the original failure
+  condition under 6.3.5: `cyrius deps` locks 40 deps (3,656 B, not 0) and
+  `cyrius deps --verify` reports 40 verified / 0 failed. Supply-chain hash
+  integrity is enforced again on every CI and release run.
 
 ### Verified
 
-- `cyrius deps`: 40 deps locked, lockfile healthy (non-empty).
+- `cyrius deps`: 40 deps locked (lockfile 3,656 B, healthy); `cyrius deps
+  --verify`: **40 verified, 0 failed** (workaround removed — see Changed).
 - `cyrius build programs/smoke.cyr` (DCE): **0 warnings**, 489,520 B x86_64 ELF.
   The pin-drift, `ERR_TIMEOUT`-collision, and `clock_epoch_secs`-undefined
   warnings are all gone. Binary grew vs. 0.9.4 (457,296 B) from yukti 2.2.7's
