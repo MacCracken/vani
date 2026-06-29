@@ -5,7 +5,7 @@ description = "vani — audio device I/O for Cyrius. The voice of the system."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/vani"
 language = "cyrius"
-cyrius = "6.2.1"
+cyrius = "6.3.5"
 
 # vani is a library — no CLI binary. `cyrius build` targets a smoke
 # program that links the full include chain to prove lib.cyr parses
@@ -67,27 +67,32 @@ stdlib = [
     "fnptr",
     "freelist",
     "process",
+    "chrono",
     "sakshi",
 ]
 
-# yukti — pinned ahead of the cyrius stdlib bundle. Cyrius 5.7.48
-# still ships yukti 2.1.1 in its lib/, but vani's v0.3.0 multi-device
+# yukti — pinned ahead of the cyrius stdlib bundle. vani's multi-device
 # path needs the audio enumerator surface that landed in yukti 2.2.0
 # (`yukti_audio_devices`, `_card`, `_device`, `_subdevice`,
 # `_direction`, `_name`, `_hw_id`, `_driver`, `_dev_path`,
-# `_sys_path`) plus the 2.2.1 hotplug + device_db follow-on. Drop
-# this override once cyrius re-bundles yukti ≥ 2.2.1.
+# `_sys_path`) plus the 2.2.1 hotplug + device_db follow-on. 2.2.7
+# namespaces yukti's error enum (`ERR_*` → `YUKTI_ERR_*`), clearing
+# the `ERR_TIMEOUT` duplicate-symbol collision in vani's build; vani
+# calls only `yukti_audio_*`, so the rename is non-breaking here. Drop
+# this override once cyrius re-bundles yukti ≥ 2.2.7.
 [deps.yukti]
 git = "https://github.com/MacCracken/yukti.git"
-tag = "2.2.4"
+tag = "2.2.7"
 modules = ["dist/yukti.cyr"]
 
-# patra — pinned at 1.9.2 for aarch64 portability. Cyrius 5.7.48
-# still bundles patra 1.9.0 in its stdlib, which uses raw `SYS_OPEN`
-# (undefined on aarch64's generic syscall table). 1.9.2 migrated to
-# stdlib `sys_open` wrappers. Same pattern yukti uses for its own
-# patra dep. Drop this override once cyrius re-bundles patra ≥ 1.9.2.
+# patra — pinned ahead of the cyrius stdlib bundle for aarch64
+# portability. The stdlib-bundled patra historically used raw
+# `SYS_OPEN` (undefined on aarch64's generic syscall table); 1.9.2+
+# migrated to stdlib `sys_open` wrappers. 1.12.7 is the current
+# release (per-handle tail-page cache fix — additive, source-
+# compatible). Same pattern yukti uses for its own patra dep. Drop
+# this override once cyrius re-bundles patra ≥ 1.12.7.
 [deps.patra]
 git = "https://github.com/MacCracken/patra.git"
-tag = "1.9.5"
+tag = "1.12.7"
 modules = ["dist/patra.cyr"]

@@ -25,6 +25,7 @@ include "lib/args.cyr"
 include "lib/hashmap.cyr"
 include "lib/tagged.cyr"
 include "lib/fnptr.cyr"
+include "lib/chrono.cyr"
 include "lib/yukti.cyr"
 include "lib/sakshi.cyr"
 

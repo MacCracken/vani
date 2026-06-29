@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] — 2026-06-29
+
+### Changed
+
+- **cyrius pin `6.2.1` → `6.3.5`** (ecosystem-wide stdlib pin sweep onto the
+  current toolchain — matches patra `1.12.7`, which moved to the same pin).
+  Clears the build-time pin-drift warning against the installed `cycc` 6.3.5.
+- **`[deps.yukti]` `2.2.4` → `2.2.7`.** 2.2.7 namespaces yukti's error enum
+  (`ERR_*` → `YUKTI_ERR_*`), which **clears the `ERR_TIMEOUT` duplicate-symbol
+  collision** vani's build previously emitted (old yukti `ERR_TIMEOUT = 9` vs.
+  stdlib sakshi `ERR_TIMEOUT = 5`, conflicting values). vani calls only
+  `yukti_audio_*`, so the breaking rename is non-breaking here — verified zero
+  bare yukti `ERR_*` references in `src/`, `programs/`, `tests/` (the two
+  `ERR_YUKTI_DESCRIPTOR` hits are assert message strings; the real symbol is
+  vani's own `VANI_ERR_YUKTI_DESCRIPTOR`).
+- **`[deps.patra]` `1.9.5` → `1.12.7`.** Source-compatible for vani: the 9
+  `patra_*` symbols yukti's device_db references have byte-identical signatures
+  across 1.9.5 → 1.12.7, and vani never exercises the device_db path (only the
+  `yukti_audio_*` enumerator). patra's internal `TK_*` → `SQLT_*` rename and
+  `.patra` on-disk format change (1.10–1.12) are confined to patra internals.
+- **Added `chrono` to `[deps].stdlib` and the `src/lib.cyr` include chain
+  (before `yukti`).** Load-bearing for this bump: yukti ≥ 2.2.6 routes its
+  device_db timestamps through `chrono.clock_epoch_secs()`, and cyrius **6.3.2
+  promoted a reachable call to an undefined function from a warning to a hard
+  compile error**. Without `chrono`, the yukti bump would fail the build
+  outright. vani's own `src/*.cyr` call no chrono symbols — the dependency is
+  purely transitive via yukti.
+
+### Verified
+
+- `cyrius deps`: 40 deps locked, lockfile healthy (non-empty).
+- `cyrius build programs/smoke.cyr` (DCE): **0 warnings**, 489,520 B x86_64 ELF.
+  The pin-drift, `ERR_TIMEOUT`-collision, and `clock_epoch_secs`-undefined
+  warnings are all gone. Binary grew vs. 0.9.4 (457,296 B) from yukti 2.2.7's
+  device_db surface + the new `chrono` module.
+- Aarch64 cross-build (`cycc_aarch64`, DCE): clean, valid ARM aarch64 ELF.
+- `cyrius lint`: 0 warnings across `src/`, `programs/`, `tests/`.
+- `cyrius fmt`: diff-clean.
+- `cyrius vet programs/smoke.cyr`: 1 dep, 0 untrusted, 0 missing.
+- `cyrius test tests/tcyr/vani.tcyr`: **258 / 258** pass.
+- `cyrius bench tests/bcyr/vani.bcyr`: no regression — `ring_200ms_playback`
+  86.4 µs avg (min 82.4 µs) vs. 82.96 µs baseline at `59dd681`, within the
+  noise floor. **bench-history.csv not appended** (quiet pin bump, matches the
+  0.9.5 precedent). Note: cyrius 6.3.5's bench CSV emitter inflates
+  µs-formatted values 10× (`CSV:ring_200ms_playback,823525` vs. the correct
+  86.4 µs human reading) — the raw CSV row must not be committed as-is.
+- `cyrius distlib` + `cyrius distlib core`: `dist/vani.cyr` (2100 lines) +
+  `dist/vani-core.cyr` (799 lines) regenerated with v0.9.6 headers; bundle
+  bodies byte-identical (vani's distlib'd modules carry no includes). cyrius
+  6.3.5 also emits `dist/vani.deps` / `dist/vani-core.deps` stdlib-leaf
+  sidecars (now committed, matching patra's convention).
+
+### Security
+
+- CVE awareness sweep since the 2026-05-01 audit (no new audit doc — quiet pin
+  bump). Reviewed ALSA kernel CVEs: snd-aloop UAF `CVE-2026-46090`, OSS-compat
+  `CVE-2026-46157`, USB UAC3 parser `CVE-2026-46146`, control-enum
+  `CVE-2026-46088`, caiaq USB `CVE-2026-46004`/`CVE-2026-46048`, HDA Conexant
+  `CVE-2026-53291`. **All are kernel-side; none are reachable** from vani's
+  pure-userspace native-PCM ioctl surface (vani issues `SNDRV_PCM_IOCTL_*` /
+  control ioctls, parses no USB descriptors, registers no controls). Closest
+  touch is `src/mixer.cyr` (control reads, gated by element type) vs.
+  `CVE-2026-46088` — awareness-only, no guard warranted. No vani change.
+
 ## [0.9.5] — 2026-06-12
 
 ### Changed

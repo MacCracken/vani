@@ -15,7 +15,7 @@ Cyrius ecosystem. The voice of the system.
   (`dist/vani-core.cyr`, 29 KB, 22 `audio_*` symbols — playback
   path only, single module from `src/alsa.cyr`)
 - **License**: GPL-3.0-only
-- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius`, currently `5.7.48`)
+- **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — the source of truth; current pin tracked in [`docs/development/state.md`](docs/development/state.md))
 - **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
 - **Genesis repo**: [agnosticos](https://github.com/MacCracken/agnosticos)
 - **Standards**: [First-Party Standards](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-standards.md) · [First-Party Documentation](https://github.com/MacCracken/agnosticos/blob/main/docs/development/applications/first-party-documentation.md)
@@ -82,15 +82,21 @@ See [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib
 
 - **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`,
   `vec`, `io`, `fs`, `args`, `hashmap`, `tagged`, `fnptr`,
-  `freelist`, `process`, `patra`, `sakshi` (all ship with Cyrius
-  ≥ 5.7.39).
-- **Yukti (git-pinned)** — `[deps.yukti]` at tag `2.2.1` until
-  cyrius re-bundles ≥ 2.2.1 in its stdlib. Provides the audio
-  enumerator surface vani's `vani_open_yukti(desc)` consumes.
-- **Patra (git-pinned)** — `[deps.patra]` at tag `1.9.2` until
-  cyrius re-bundles ≥ 1.9.2. Pinned for aarch64 portability —
-  patra 1.9.0 (cyrius-bundled) uses raw `SYS_OPEN` which is
-  undefined on aarch64. See ADR 0001 for the override pattern.
+  `freelist`, `process`, `chrono`, `patra`, `sakshi` (all ship with
+  Cyrius ≥ 5.7.39). `chrono` (added 0.9.6) is a transitive
+  requirement of yukti ≥ 2.2.6 (`clock_epoch_secs`), not called by
+  vani's own modules.
+- **Yukti (git-pinned)** — `[deps.yukti]` git override until cyrius
+  re-bundles it in stdlib (exact tag in `cyrius.cyml`; current pin
+  tracked in [`docs/development/state.md`](docs/development/state.md)).
+  Provides the audio enumerator surface vani's `vani_open_yukti(desc)`
+  consumes.
+- **Patra (git-pinned)** — `[deps.patra]` git override until cyrius
+  re-bundles it (exact tag in `cyrius.cyml`; current pin tracked in
+  [`docs/development/state.md`](docs/development/state.md)). Pinned
+  for aarch64 portability — patra 1.9.0 (cyrius-bundled) uses raw
+  `SYS_OPEN` which is undefined on aarch64. See ADR 0001 for the
+  override pattern.
 
 `audio` is **no longer a stdlib dep** — vani owns that surface
 in-tree at `src/alsa.cyr`. `cyrius/lib/audio.cyr` retires at 5.8.0.
@@ -450,7 +456,9 @@ Thumbs.db
 
 `dist/vani.cyr` is **NOT** gitignored — it's the consumer-facing
 artifact and the CI distlib-drift gate verifies it stays in sync
-with `src/`.
+with `src/`. The `dist/*.deps` sidecars `cyrius distlib` emits
+(cyrius ≥ 6.2.47) are likewise committed — consumers' `cyrius deps`
+reads them to resolve vani's stdlib leaves.
 
 `cyrius.lock` is **NOT** gitignored — it's the supply-chain
 integrity anchor for the git-pinned yukti dep.

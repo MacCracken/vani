@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `0.9.4` (pre-1.0 release candidate, audio-core profile) |
-| Released | 2026-05-21 |
-| Cyrius toolchain pin | `6.0.1` |
-| Yukti pin (`[deps.yukti]`) | tag `2.2.4` (git override until cyrius re-bundles ≥ 2.2.4) |
-| Patra pin (`[deps.patra]`) | tag `1.9.5` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.9.5) |
+| Current version | `0.9.6` (pre-1.0 release candidate, audio-core profile) |
+| Released | 2026-06-29 |
+| Cyrius toolchain pin | `6.3.5` |
+| Yukti pin (`[deps.yukti]`) | tag `2.2.7` (git override until cyrius re-bundles ≥ 2.2.7) |
+| Patra pin (`[deps.patra]`) | tag `1.12.7` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.12.7) |
 | Distribution profiles | full (`dist/vani.cyr`, 76 KB / 106 symbols) and core (`dist/vani-core.cyr`, 29 KB / 22 symbols) |
 | Latest P(-1) audit | [`docs/audit/2026-05-01-v0.9.1-audit.md`](../audit/2026-05-01-v0.9.1-audit.md) |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0) |
@@ -26,7 +26,7 @@
 | CPU test assertions | 258 (groups: error, format, buffer, device, yukti, audit-2026-04-30, hw_params, hw_refine, mixer, v0.4.0 state + sw_params) |
 | CPU benchmarks | 13 (format / ring / hwp / negotiate paths) |
 | Real-HW programs | 8 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`) |
-| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); current at v0.9.0 commit (per latest `bench-history.csv` row) |
+| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row `59dd681` (2026-05-21, v0.9.4). 0.9.5 / 0.9.6 not appended (quiet pin bumps; plus the cyrius 6.3.5 bench-CSV µs bug below). |
 
 ## Build Artifacts
 
@@ -36,7 +36,8 @@
 | `dist/vani-core.cyr` (core profile) | 29,015 B / 800 lines (v0.9.1) | Playback-only single-module bundle: 22 `audio_*` symbols from `src/alsa.cyr` only. **62% smaller** than full. |
 | `build/vani_smoke` | ~438 KB (DCE off) | x86_64 ELF link-check binary |
 | `build/vani_smoke-aarch64` | (built per cut) | aarch64 ELF link-check binary (since 0.9.0) |
-| `build/vani_smoke` (DCE) | bumped per release | Set in CI release workflow |
+| `build/vani_smoke` (DCE) | 489,520 B (0.9.6) | x86_64; grew from yukti 2.2.7 device_db surface + the new `chrono` stdlib module |
+| `dist/vani.deps`, `dist/vani-core.deps` | 14 stdlib leaves each | cyrius 6.3.5 distlib sidecars (auto-generated, consumed by consumers' `cyrius deps`); committed alongside the bundles, matching patra's convention |
 
 ## Real-HW Verification
 
@@ -58,6 +59,7 @@
 | XRUN-rate stress benchmark | optional pre-1.0 | Not blocking 1.0; reproducing CPU contention reliably needs harness setup beyond a release gate. |
 | Portable `_clock_monotonic()` for throughput / latency_test | optional pre-1.0 | `programs/throughput.cyr` and `programs/latency_test.cyr` still use raw `syscall(228)` (clock_gettime). x86_64-only by design — fixes when an aarch64 dev host with audio HW exists. |
 | USB audio interface integration | v0.5.x | HW-gated (need a Behringer UCA222 / Focusrite Scarlett class). |
+| cyrius 6.3.5 bench-CSV µs 10× bug | toolchain (watch) | `cyrius bench` CSV emitter inflates µs-formatted values 10× (`ring_200ms_playback` → `823525` vs. the true ~82–86k ns; human-readable output correct). Do **not** append raw CSV µs rows to `bench-history.csv` until a cyrius fix lands. |
 | HDMI audio integration | v0.5.x | `pcmC0D{3,7,8,9}p` on the dev box's existing card 0. |
 | Sub-10ms low-latency on USB | v0.5.x | onboard HDA rejects sub-10ms periods. |
 
@@ -77,6 +79,8 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `0.9.6` | 2026-06-29 | `cyrius` pin `6.2.1` → `6.3.5`; `[deps.yukti]` `2.2.4` → `2.2.7` (clears the `ERR_TIMEOUT` duplicate-symbol collision); `[deps.patra]` `1.9.5` → `1.12.7`; added stdlib `chrono` (yukti 2.2.6+ calls `clock_epoch_secs`, hard-required under cyrius 6.3.2's undefined-fn-is-error). 258/258, 0 warnings. |
+| `0.9.5` | 2026-06-12 | `cyrius` pin `6.0.1` → `6.2.1` (ecosystem stdlib pin sweep; no source changes). |
 | `0.9.4` | 2026-05-21 | `cyrius` toolchain pin bumped 5.11.4 → 6.0.1. `[deps.yukti]` bumped 2.2.2 → 2.2.4, `[deps.patra]` bumped 1.9.3 → 1.9.5. |
 | `0.9.3` | 2026-05-11 | Stdlib annotation pass — every public fn in `src/*.cyr` carries a `: i64` return-type annotation (parse-only). `cyrius` pin bumped 5.8.64 → 5.11.4 for the v5.10.x type-system arc. |
 | `0.9.1` | 2026-05-01 | `core` distribution profile added. `cyrius distlib core` → `dist/vani-core.cyr` (29 KB, 22 symbols, 62% smaller than full). Drives the cyrius-doom audio-core consumer story without touching the full bundle or the public API. |
@@ -88,13 +92,13 @@
 Vani depends on:
 
 ```
-cyrius (6.0.1)
-  ├─ stdlib (15 modules: syscalls / string / alloc / str / fmt /
+cyrius (6.3.5)
+  ├─ stdlib (16 modules: syscalls / string / alloc / str / fmt /
   │        vec / io / fs / args / hashmap / tagged / fnptr /
-  │        freelist / process / sakshi)
-  ├─ [deps.yukti] (git tag 2.2.4) — pinned ahead of cyrius's bundled
+  │        freelist / process / chrono / sakshi)
+  ├─ [deps.yukti] (git tag 2.2.7) — pinned ahead of cyrius's bundled
   │                                  yukti until rebundle.
-  └─ [deps.patra] (git tag 1.9.5) — pinned ahead of cyrius's bundled
+  └─ [deps.patra] (git tag 1.12.7) — pinned ahead of cyrius's bundled
                                      patra for aarch64
                                      portability; until rebundle.
 ```
