@@ -45,6 +45,7 @@
 |------|-----------------|--------|
 | Dev box (HDA Generic + HDMI + ACP) | 8 PCM endpoints across cards 0/1/2 | All 8 programs PASS as of 0.3.0 |
 | First playback target | card 1 device 0 / `pci:0000:04:00.6:dev0:p` (ALC897 Analog) | `probe`, `devices`, `tone` round-trip clean |
+| **Consumer audible** (cyrius-doom 0.30.5) | card 1 device 0 (ALC897), auto-selected by doom's capture-sibling scan | **First audible real-HW consumer** (2026-06-29): DOOM SFX play end-to-end through vani at **S16_LE / stereo / 44100** (`audio_set_params_full` + `sw_params`); not just degrade-clean — actual sound out |
 
 | Hardware class | v0.3.0 status | Tracked in |
 |----------------|---------------|------------|
@@ -65,15 +66,20 @@
 
 ## Downstream Consumers
 
-> When this list reaches 2+ live consumers, the v1.0.0 freeze
-> criteria #2 / #3 are met.
+> v1.0.0 freeze criteria #2 / #3 are **met**: **3 live consumers**
+> (doom, polyomino, bb), past the "2+ live consumers" bar; the core
+> profile is now **real-HW-audible-verified** (doom 0.30.5, 2026-06-29 —
+> first consumer confirmed making sound on hardware). **Caveat:** all
+> three exercise only the `audio_*` **core** profile — the full `vani_*`
+> surface (ring / capture / mixer / XRUN / `vani_open_yukti`) has zero
+> live-consumer validation (see v1.0.0 #5, split-freeze note).
 
 | Project | Status | Notes |
 |---------|--------|-------|
-| cyrius-doom | **integrated** (against vani 0.3.0) — pending the doom-side commit/tag | v1.0.0 #2 satisfied. Integration shape: `[deps.vani]` git override + drop `audio` from stdlib. Zero changes in doom's `src/audio.cyr` (byte-stable `audio_*` API). End-to-end smoke against shareware DOOM1.WAD: WAD loaded, map E1M1 loaded, audio degrade-path ("no device" — card 0 has no PCM device 0 on the dev box) clean, render pipeline continues, exit 0. |
-| jalwa | not yet integrated — still Rust as of 2026-04-29 | v1.0.0 #3 candidate; gated on Rust → Cyrius port. |
-| dhvani | not yet integrated — still Rust as of 2026-04-02 | v1.0.0 #3 candidate; gated on Rust → Cyrius port. |
-| agnoshi | not yet integrated — Cyrius (4.5.0 pin), no audio path yet | v1.0.0 #3 candidate; gated on agnoshi gaining audio + a toolchain refresh. |
+| cyrius-doom | **live + audibly verified on real HW** — declared `[deps.vani]`, core profile | Released **0.30.5** (committed + tagged `0.30.5`, HEAD `95f8e76`). `[deps.vani]` git override at tag `0.9.5` (one patch behind current 0.9.6). **First consumer confirmed audible on real hardware** (2026-06-29): DOOM SFX (DSPISTOL/DSDOROPN/…) play end-to-end through `audio_write` in the 35 Hz `audio_tick` loop, at **S16_LE / stereo / 44100** (converted from DOOM's native 8-bit-mono 11025). Deepest exerciser of the three: `audio_open_best` multi-card scan auto-selects the analog codec (card 1 dev 0 here) by probing for a capture sibling (`audio_open_capture`), then configures via `audio_set_params_full` (period/buffer) + `audio_set_sw_params` (start threshold). **9** `audio_*` symbols — incl. the first consumer touch of `audio_open_capture` (probe-only, no `audio_read`). |
+| cyrius-polyomino | **live** — vendored vani-core, core profile | Released **0.5.1** (committed + tagged). Vendors `vendor/vani-core.cyr` (vani 0.9.6 core) to avoid the patra/yukti transitive bloat. Piece-lock / line-clear / level-up / top-out SFX → `audio_write` in the ~60 fps `run_interactive` loop (default `argc<2` path). 6 `audio_*` symbols. Defaults to card 1 dev 0 (`AudioDev` constants). |
+| cyrius-bb | **live** — vendored vani-core, core profile | Released **0.8.0** (committed + tagged). Replaced its legacy OSS `/dev/dsp` sink with vendored `vendor/vani-core.cyr` (vani 0.9.6 core). Brick/wall/paddle + lost/over/fanfare SFX → `audio_write_bytes` in `play_game`'s frame loop (default `run_interactive`). 6 `audio_*` symbols. |
+| jalwa / dhvani / agnoshi | not yet integrated | The original v1.0.0 #3 candidates, still gated (jalwa/dhvani Rust→Cyrius port; agnoshi no audio path). Superseded as the #3 trigger by the three game consumers above — they were illustrative of the expected ecosystem, not a hard allowlist. |
 
 ## Shipped Releases
 
