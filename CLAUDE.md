@@ -347,7 +347,7 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
   individual lifetimes — vani currently uses `alloc` only;
   freelist is available if a future XRUN-recovery path needs it
 - Enum values for constants — don't consume `gvar_toks` slots
-  (256 initialized globals limit)
+  (4,096 initialized globals limit)
 - Heap-allocate large buffers — `var buf[256000]` bloats the
   binary by 256KB. Vani's largest stack alloc is the 608-byte
   `var hwp[608]` HW_PARAMS scratchpad in
@@ -360,7 +360,8 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 - `match` is reserved — don't use as a variable name
 - `return;` without value is invalid — always `return 0;`
 - All `var` declarations are function-scoped — no block scoping
-- Max limits per compilation unit: 4,096 variables, 1,024 functions, 256 initialized globals
+- Max limits per compilation unit: 4,096 variables, 1,024 functions, 4,096 initialized globals
+- Counting rule: only a top-level `var NAME = <non-literal>;` (call / identifier / expression initializer) consumes an initialized-globals slot; a bare integer-literal init (`var x = 42;`) takes the static-init fast path and enum members are const-folded, so neither counts. See the cyrius guide's **Global Initializers** section (`docs/guides/cyrius-guide.md` in the cyrius repo)
 
 ## CI / Release
 

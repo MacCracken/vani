@@ -1,0 +1,91 @@
+# programs/vanitone.cyr — vani-core bring-up tone (Gate-4 proof)
+#
+# The minimal proof that vani's audio backend plays sound: open →
+# set_params → write a synthesized tone → drain → close, through the
+# `audio_*` PCM shim in src/alsa.cyr (the `[lib.core]` / dist/vani-core
+# profile — NO yukti enumerator, NO vani_* Result wrapper). This is the
+# path a real consumer like cyrius-doom takes, and the one that builds
+# `--agnos` (the full vani_* API pulls yukti, which isn't agnos-ported).
+#
+# Synthesis is INTEGER-only (a phase-accumulated square wave) so it runs
+# on agnos ring-3 TODAY — no f64/SSE, which would #UD until the kernel
+# FP arc (1.53.x) lands. 440 Hz, 48 kHz stereo S16_LE, ~1.5 s, ±6000
+# (~-15 dBFS). Check volume before running on iron.
+#
+# Build:  cyrius build programs/vanitone.cyr build/vanitone --agnos
+#         cyrius build programs/vanitone.cyr build/vanitone           (host)
+
+include "src/alsa.cyr"
+
+enum VtCfg {
+    VT_RATE     = 48000;
+    VT_FREQ     = 440;
+    VT_DUR_MS   = 1500;
+    VT_AMP      = 6000;
+    VT_CHANNELS = 2;
+    VT_BITS     = 16;
+    VT_BPF      = 4;      # bytes per frame = channels * (bits/8) = 2*2
+}
+
+fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
+
+# Store an i16 little-endian at p (low byte first).
+fn _store_i16le(p, v) {
+    store8(p,     v & 255);
+    store8(p + 1, (v >> 8) & 255);
+    return 0;
+}
+
+# Fill a stereo S16_LE buffer with a `frames`-long 440 Hz square wave.
+# Phase via integer modulo (no % operator in Cyrius: i - (i/period)*period).
+fn _fill_square(buf, frames) {
+    var period = VT_RATE / VT_FREQ;   # ~109 samples / cycle
+    var half   = period / 2;
+    var i = 0;
+    while (i < frames) {
+        var phase = i - ((i / period) * period);
+        var s = 0 - VT_AMP;
+        if (phase < half) { s = VT_AMP; }
+        var off = i * VT_BPF;
+        _store_i16le(buf + off,     s);   # left
+        _store_i16le(buf + off + 2, s);   # right
+        i = i + 1;
+    }
+    return 0;
+}
+
+fn main(): i64 {
+    alloc_init();
+    _puts("vanitone: 440 Hz square, 1.5 s, 48k/16/2 via vani-core\n");
+
+    var dev = audio_open_playback(0, 0);
+    if (dev == 0) { _puts("open: FAIL\n"); return 1; }
+
+    var cr = audio_set_params(dev, VT_RATE, VT_CHANNELS, VT_BITS);
+    if (cr < 0) { _puts("config: FAIL\n"); audio_close(dev); return 1; }
+
+    audio_prepare(dev);   # no-op on agnos; real transition on ALSA
+
+    var frames = (VT_RATE * VT_DUR_MS) / 1000;   # 72000
+    var buf = alloc(frames * VT_BPF);
+    _fill_square(buf, frames);
+
+    # audio_write is kernel-paced/blocking but may short-write — loop
+    # until every frame is accepted (the WRITEI contract on both targets).
+    var w = 0;
+    while (w < frames) {
+        var got = audio_write(dev, buf + w * VT_BPF, frames - w);
+        if (got <= 0) { break; }
+        w = w + got;
+    }
+    if (w < frames) { _puts("write: SHORT\n"); audio_close(dev); return 1; }
+
+    _puts("wrote frames; draining\n");
+    audio_drain(dev);
+    audio_close(dev);
+    _puts("VANITONE PASS\n");
+    return 0;
+}
+
+fn _entry(): i64 { var r = main(); sys_exit(r); return 0; }
+_entry();

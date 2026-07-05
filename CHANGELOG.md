@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] — 2026-07-04
+
+### Added
+
+- **AGNOS backend for the `audio_*` PCM shim** (`src/alsa.cyr`, the
+  `[lib.core]` / `dist/vani-core.cyr` profile). Every seam function gains a
+  `#ifdef CYRIUS_TARGET_AGNOS … #else … #endif` split (the sanctioned
+  `cyrius/lib/net.cyr` per-function-branch shape): the Linux ALSA ioctl
+  machinery becomes `#else`-only, and the agnos branch calls the sovereign
+  `snd_*` syscall band (`#64-69`) directly — `audio_open_playback` →
+  `sys_snd_open`, `audio_set_params(_full)` → `sys_snd_config` (format
+  encoded `(bit_depth<<8)|channels`, e.g. `0x1002` = S16 stereo),
+  `audio_write` → `sys_snd_write`, `audio_drain` → `sys_snd_drain`,
+  `audio_close` → `sys_snd_close`. `prepare`/`start`/`drop`/`resume`/
+  `set_sw_params` are agnos no-ops (the BDL ring self-paces); `open_capture`/
+  `read` fail closed (no input band yet); `get_state` reports RUNNING. The
+  handle struct is unchanged (fd/rate/channels/bit_depth); on agnos the "fd"
+  slot is the `snd_id` (0..3). The full wrapper `vani_*` API flows through
+  these, so **any vani-core consumer plays audio on agnos** — the same path
+  `cyrius-doom` should consume instead of its hand-rolled `sys_snd_*` calls.
+  `SYS_IOCTL` is undefined on agnos, so the Linux bodies **must** be fully
+  `#else`-wrapped (not early-return) — hence every ioctl fn is branched.
+- **`programs/vanitone.cyr`** — a Gate-4 bring-up proof: opens playback,
+  configures 48k/16/2, blocking-streams a 1.5 s 440 Hz square (integer-only
+  synthesis — no `f64`/SSE, so it runs on agnos ring-3 today), drains, closes.
+  Built as a doom-style `dist/vani-core.cyr` consumer, it is **QEMU-validated
+  on agnos** (`agnos/scripts/vani-tone-smoke.sh`: intel-hda wav capture,
+  `RMS=2771 PEAK=4448`, `hda: output path enabled / stream running`).
+
+### Changed
+
+- **cyrius pin `6.3.5` → `6.4.2`** — for the `sys_snd_*` #64-69 peer (frozen
+  audio ABI, cyrius 6.4.2) the agnos backend binds to, plus the
+  `CYRIUS_TARGET_AGNOS` predefine that gates it.
+
+### Notes
+
+- The **full `vani_*` API does not yet build `--agnos`**: `src/device.cyr`
+  pulls the **yukti** audio enumerator, which isn't agnos-ported (it uses
+  `SYS_IOCTL` + wrong-arity `sys_stat`/`sys_mount`/`sys_rmdir` on agnos). The
+  agnos-consumable path is therefore **`dist/vani-core.cyr`** (the `audio_*`
+  shim, no yukti), exactly as `cyrius-doom` consumes it. A yukti agnos-port is
+  the follow-on that unblocks the full multi-device API on agnos.
+
 ## [0.9.6] — 2026-06-29
 
 ### Changed

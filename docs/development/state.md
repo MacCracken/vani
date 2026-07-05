@@ -10,8 +10,8 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `0.9.6` (pre-1.0 release candidate, audio-core profile) |
-| Released | 2026-06-29 |
+| Current version | `0.9.7` (pre-1.0 release candidate, audio-core profile + AGNOS backend) |
+| Released | 2026-07-04 |
 | Cyrius toolchain pin | `6.3.5` |
 | Yukti pin (`[deps.yukti]`) | tag `2.2.7` (git override until cyrius re-bundles ≥ 2.2.7) |
 | Patra pin (`[deps.patra]`) | tag `1.12.7` (git override for aarch64 portability; until cyrius re-bundles ≥ 1.12.7) |
