@@ -48,30 +48,14 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      - name: Lock file present
-        # cyrius.lock is the supply-chain integrity anchor for the
-        # [deps.yukti] git override (and any future git deps).
-        # Without a committed lock, `cyrius deps` resolves fresh and
-        # `cyrius deps --verify` trivially matches the just-created
-        # lock — providing zero integrity. Guard catches accidental
-        # .gitignore additions / deletions before they regress.
-        # Audit reference: docs/audit/2026-04-30-v0.3.0-audit.md (LOW-1).
-        run: |
-          test -f cyrius.lock || {
-            echo "::error::cyrius.lock missing — supply-chain integrity requires this committed"
-            exit 1
-          }
-
+      # vani 0.9.9: now ALL-STDLIB — yukti/patra folded into cyrius 6.4.3,
+      # so there are no git deps and no committed cyrius.lock (matches the
+      # sakshi/bayan pattern). The supply chain is pinned by the cyrius
+      # toolchain version, so the old lock-present guard + `deps --verify`
+      # (which anchored the [deps.yukti]/[deps.patra] git overrides) are
+      # retired. `cyrius deps` is a no-op here but kept for parity.
       - name: Resolve dependencies
         run: cyrius deps
-
-      - name: Verify dep hashes
-        # Enforces lockfile hash integrity for the git-pinned deps.
-        # The Cyrius 6.0.1 lockfile-truncation workaround (conditional
-        # skip on an empty lock) was removed at vani 0.9.6 — the bug is
-        # fixed since the 6.3.5 toolchain pin: `cyrius deps` writes a
-        # full lock and `cyrius deps --verify` passes.
-        run: cyrius deps --verify
 
       - name: Lint
         # Auto-discover so new modules are covered without editing CI.

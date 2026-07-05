@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.8] — 2026-07-04
+## [0.9.9] — 2026-07-04
+
+**Post-fold cleanup — vani is now ALL-STDLIB.** vani 0.9.8 + yukti 2.2.8 + patra
+1.12.8 landed in the **cyrius 6.4.3** stdlib, so the transitional git overrides
+are retired and vani consumes the sovereign stdlib directly.
+
+### Changed
+
+- **cyrius pin `6.4.2` → `6.4.3`** (the release that bundles vani/yukti/patra).
+- **Dropped the `[deps.yukti]` and `[deps.patra]` git overrides** — both are now
+  stdlib modules. Added `yukti` + `patra` (and patra's transitive `atomic` /
+  `sync` / `thread_local`) to `[deps].stdlib`. Builds clean on x86_64 / aarch64 /
+  `--agnos` (on agnos, patra is excluded via yukti's `#ifndef`-gated `device_db`,
+  so the full `vani_*` API still resolves to the sovereign HDA path).
+
+### Removed
+
+- **The committed `cyrius.lock`** and the CI lock-integrity steps (the
+  `Lock file present` guard + `cyrius deps --verify`). Those anchored the
+  now-gone git overrides; with zero git deps the supply chain is pinned by the
+  cyrius toolchain version. Matches the all-stdlib pattern of `sakshi` / `bayan`.
 
 **Full `vani_*` device API now builds + runs on AGNOS** (0.9.7 shipped only the
 lean vani-core `audio_*` shim). Proven end-to-end: `vani_open_playback` → yukti
