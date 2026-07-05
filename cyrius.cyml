@@ -69,6 +69,9 @@ stdlib = [
     "process",
     "chrono",
     "sakshi",
+    "atomic",
+    "sync",
+    "thread_local",
 ]
 
 # yukti — pinned ahead of the cyrius stdlib bundle. vani's multi-device
@@ -81,8 +84,9 @@ stdlib = [
 # calls only `yukti_audio_*`, so the rename is non-breaking here. Drop
 # this override once cyrius re-bundles yukti ≥ 2.2.7.
 [deps.yukti]
+path = "../yukti"           # local override until yukti 2.2.8 is tagged / stdlib-folded
 git = "https://github.com/MacCracken/yukti.git"
-tag = "2.2.7"
+tag = "2.2.8"
 modules = ["dist/yukti.cyr"]
 
 # patra — pinned ahead of the cyrius stdlib bundle for aarch64
@@ -96,3 +100,4 @@ modules = ["dist/yukti.cyr"]
 git = "https://github.com/MacCracken/patra.git"
 tag = "1.12.7"
 modules = ["dist/patra.cyr"]
+target = "linux"

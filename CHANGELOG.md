@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] — 2026-07-04
+
+**Full `vani_*` device API now builds + runs on AGNOS** (0.9.7 shipped only the
+lean vani-core `audio_*` shim). Proven end-to-end: `vani_open_playback` → yukti
+enumeration → `audio_open_playback` → `sys_snd_*` → the sovereign HDA DAC
+(QEMU play_tone, non-silent wav).
+
+### Changed
+
+- **`[deps.yukti]` `2.2.7` → `2.2.8`** — yukti 2.2.8 adds an agnos branch to
+  `yukti_audio_devices()` (reports the one fixed HDA endpoint instead of walking
+  `/dev/snd` + `/proc/asound`, which don't exist on agnos), plus agnos stubs for
+  the Linux-only syscall constants its enumerator modules reference.
+- **`[deps.patra]` marked `target = "linux"`** (tag stays `1.12.7`) — patra
+  (yukti's `device_db` backend) is Linux-only; `target = "linux"` drops it from
+  the agnos build (agnos has no device-history store; yukti 2.2.8 gates `device_db`
+  off there to match). It materializes normally for vani's Linux build.
+- **Added `atomic` / `sync` / `thread_local` to `[deps].stdlib`** — patra 1.12.7's
+  transitive stdlib requirements, which the cyrius 6.4.x strict transitive-dep
+  check now requires named explicitly (they were tolerated implicitly under the
+  old pin). All three have agnos branches, so they are target-safe.
+
+### Notes
+
+- Both audio paths now work on agnos: the lean **`dist/vani-core.cyr`** shim
+  (what `cyrius-doom` consumes) and the **full `vani_*` API** via yukti. On agnos
+  yukti reports a single fixed HDA endpoint — multi-device enumeration is a
+  Linux-only concern (agnos has one audio output).
+- **Release ordering:** yukti **2.2.8** must be tagged before/with this vani cut
+  (the `[deps.yukti]` git tag resolves against it); local verification used a
+  `path = "../yukti"` override, dropped from the committed manifest.
+
 ## [0.9.7] — 2026-07-04
 
 ### Added
