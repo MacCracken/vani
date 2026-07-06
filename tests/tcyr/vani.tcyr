@@ -578,6 +578,16 @@ fn test_resume_ioctl_encoding() {
     return 0;
 }
 
+fn test_pause_ioctl_encoding() {
+    # _IOW('A', 0x45, int): WRITE dir (1<<30) | size 4 (int) (<<16) |
+    # type 'A' (<<8) | nr 0x45 = 0x40044145. Guards the size-field
+    # mis-encoding class the 2026-04-30 audit fixed for WRITEI/READI.
+    # Dormant today — PAUSE has no wrapper — but pinned so a future
+    # audio_pause() inherits a correct number (audit 2026-07-06).
+    assert_eq(SNDRV_PCM_IOCTL_PAUSE, 0x40044145, "PAUSE = _IOW('A',0x45,int)");
+    return 0;
+}
+
 fn test_hwp_mask_offsets() {
     assert_eq(_hwp_mask_off(0), 4,   "ACCESS at +4");
     assert_eq(_hwp_mask_off(1), 36,  "FORMAT at +36");
@@ -879,6 +889,7 @@ fn main() {
     test_swp_layout_constants();
     test_swp_ioctl_size_encoding();
     test_resume_ioctl_encoding();
+    test_pause_ioctl_encoding();
 
     assert_summary();
     return 0;

@@ -73,16 +73,23 @@ Need access to non-onboard audio to close out v0.2.0 #6 / #7:
       preset (5ms × 4 = 20ms) that gates on the device's
       reported minimum period.
 
-## v1.0.0 — Stable
+## v1.0.0 — Stable — **SHIPPED 2026-07-06**
 
-| # | Item | Status |
-|---|------|--------|
-| 1 | Multi-hardware integration coverage (3+ targets) | Onboard HDA verified; USB + HDMI gated on access (see v0.5.x above) |
-| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | **Met — audibly verified on real HW.** cyrius-doom **0.30.5** (committed + tagged) ships a `[deps.vani]` override (tag `0.9.5`); DOOM SFX route through `audio_write` in the 35 Hz `audio_tick` loop on the default path, confirmed **audible on real hardware** at S16/stereo/44100 (2026-06-29). Core profile only, but the deepest exerciser — `audio_set_params_full` / `sw_params` + an `audio_open_capture` codec probe. |
-| 3 | Second downstream consumer: one of `jalwa` / `dhvani` / `agnoshi` | **Met (core profile).** The "2+ live consumers" bar is cleared with three: doom + `cyrius-polyomino` 0.5.1 (tagged) + `cyrius-bb` 0.8.0 (tagged), both vendoring vani 0.9.6 core and emitting live SFX on their default paths. The named trio remain gated (jalwa/dhvani Rust; agnoshi no audio) but were illustrative — precedent is #2's consumer is itself the game cyrius-doom. **Caveat:** all three validate only the `audio_*` core shim, not the full `vani_*` surface. |
-| 4 | API surface diff via `cyrius api-surface` captured as v1 baseline | **v0.9.0 baseline captured** at `docs/api-surface.snapshot` (106 public symbols). Diff against this at v1.0.0 freeze. |
-| 5 | Public API frozen; SemVer guarantees | Consumer gating now cleared (#2 / #3 met for the core profile), but the freeze action is not yet performed and stays blocked by #1. **Split-freeze recommended:** freeze the 22-symbol `audio_*` **core** profile at 1.0.0 (production-proven across doom / polyomino / bb); hold the full `vani_*` surface (ring / capture / mixer / XRUN / `vani_open_yukti` — consumer-unvalidated) at a pre-1.0 / experimental SemVer tier until a consumer exercises it. |
-| 6 | Migration-guide entry for any pre-1.0 breaking changes | Aggregate from CHANGELOG when freezing |
+Cut with the **full `vani_*` surface frozen** under SemVer (106 symbols).
+Criteria closeout:
+
+| # | Item | Status at cut |
+|---|------|---------------|
+| 1 | Multi-hardware integration coverage (3+ targets) | **Accepted as HW-gated deferral.** Onboard analog (HDA / ALC897) verified + **audible** (doom). USB + HDMI never round-tripped — **no hardware access**, not a code gap: the same frozen code path drives them. Reclassified to post-1.0 hardware coverage (see v0.5.x); does **not** touch the frozen API. |
+| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | **Met — audible on real HW.** cyrius-doom 0.30.5 (tagged), core profile, S16/stereo/44100 (2026-06-29). |
+| 3 | Second downstream consumer | **Met — four consumers.** doom + polyomino 0.5.1 + bb 0.8.0 (core), plus **dhvani 2.1.2 (full surface)** and **mishran 0.2.0 (core sink, real-HW verified 2026-07-06)**. |
+| 4 | API surface captured as v1 baseline | **Met.** `docs/api-surface.snapshot` refrozen at 106 (arity-6 `audio_set_params_full` corrected from the 2-line-signature parse artifact); `api-surface` matches exactly. |
+| 5 | Public API frozen; SemVer guarantees | **Done — full-surface freeze.** dhvani validates the full ring/capture/playback/device/format surface live, so the earlier split-freeze recommendation is superseded. Two corners (`vani_open_yukti`, `src/mixer.cyr`) are frozen but consumer-unvalidated (internally test-covered) — documented, not held back. |
+| 6 | Migration-guide entry for pre-1.0 breaking changes | **Done — no consumer-facing breaks.** The one pre-1.0 breaking change (`vani_open_yukti` `(desc,direction)`→`(desc)` at 0.3.0) touched a no-consumer stub. Aggregated in the 1.0.0 CHANGELOG **Breaking** section. Upgrade is drop-in. |
+
+Post-1.0 forward work: USB + HDMI real-HW round-trip (HW-gated, above),
+the yukti-adapter / mixer-control live-consumer validation, and the
+optional stress-bench / portable-clock items.
 
 ## Cyrius 5.8.0 fold-in (cross-cut)
 

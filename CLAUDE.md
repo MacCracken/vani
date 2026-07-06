@@ -80,23 +80,22 @@ See [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib
 
 ## Dependencies
 
-- **Cyrius stdlib** — `syscalls`, `string`, `alloc`, `str`, `fmt`,
-  `vec`, `io`, `fs`, `args`, `hashmap`, `tagged`, `fnptr`,
-  `freelist`, `process`, `chrono`, `patra`, `sakshi` (all ship with
-  Cyrius ≥ 5.7.39). `chrono` (added 0.9.6) is a transitive
-  requirement of yukti ≥ 2.2.6 (`clock_epoch_secs`), not called by
-  vani's own modules.
-- **Yukti (git-pinned)** — `[deps.yukti]` git override until cyrius
-  re-bundles it in stdlib (exact tag in `cyrius.cyml`; current pin
-  tracked in [`docs/development/state.md`](docs/development/state.md)).
-  Provides the audio enumerator surface vani's `vani_open_yukti(desc)`
-  consumes.
-- **Patra (git-pinned)** — `[deps.patra]` git override until cyrius
-  re-bundles it (exact tag in `cyrius.cyml`; current pin tracked in
-  [`docs/development/state.md`](docs/development/state.md)). Pinned
-  for aarch64 portability — patra 1.9.0 (cyrius-bundled) uses raw
-  `SYS_OPEN` which is undefined on aarch64. See ADR 0001 for the
-  override pattern.
+- **Cyrius stdlib (all deps)** — `syscalls`, `string`, `alloc`, `str`,
+  `fmt`, `vec`, `io`, `fs`, `args`, `hashmap`, `tagged`, `fnptr`,
+  `freelist`, `process`, `chrono`, `sakshi`, and — since the **0.9.9
+  all-stdlib cut** (cyrius ≥ 6.4.3 bundles vani/yukti/patra) — `yukti`,
+  `patra`, plus patra's transitive `atomic` / `sync` / `thread_local`.
+  There are **no git-override deps** anymore (and no `cyrius.lock`).
+  `chrono` (added 0.9.6) is a transitive yukti requirement
+  (`clock_epoch_secs`), not called by vani's own modules.
+- **Yukti** (now stdlib) — provides the audio enumerator surface vani's
+  `vani_open_yukti(desc)` consumes. Was a `[deps.yukti]` git override
+  through 0.9.8; folded into stdlib at 0.9.9.
+- **Patra** (now stdlib, `target = "linux"`) — yukti's `device_db`
+  backend, Linux-only (agnos gates it off; the full `vani_*` API still
+  resolves to the sovereign HDA path there). Was a `[deps.patra]` git
+  override (aarch64 portability, ADR 0001) through 0.9.8; folded into
+  stdlib at 0.9.9.
 
 `audio` is **no longer a stdlib dep** — vani owns that surface
 in-tree at `src/alsa.cyr`. `cyrius/lib/audio.cyr` retires at 5.8.0.
@@ -123,9 +122,10 @@ Never edit `lib/*.cyr` by hand. If stdlib needs a fix, fix it in
 the `cyrius` repo, cut a release, bump `cyrius = "x.y.z"` in
 `cyrius.cyml`, re-run `cyrius deps`.
 
-`cyrius.lock` is the supply-chain integrity anchor for the
-git-pinned yukti dep. Always committed; CI guards its presence
-before resolving deps.
+There is **no `cyrius.lock`** — it was dropped at the 0.9.9 all-stdlib
+cut along with the git overrides it anchored. With zero git deps, the
+supply chain is pinned by the `cyrius = "x.y.z"` toolchain version alone
+(matches the all-stdlib pattern of `sakshi` / `bayan`).
 
 ## Quick Start
 
@@ -190,7 +190,6 @@ vani/
 │   ├── ci.yml                — lint / fmt / vet / distlib drift / test / bench
 │   └── release.yml           — version gate → CI gate → DCE build → artifacts
 ├── cyrius.cyml               — package manifest + [build] + [lib] + [deps]
-├── cyrius.lock               — supply-chain integrity (committed)
 └── VERSION                   — source of truth (templated into manifest)
 ```
 
@@ -371,7 +370,6 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 - **Version-verify gate**: release asserts `VERSION == git tag` before building. Mismatch fails the run.
 - **Lint step**: CI runs `cyrius lint` per source file. Any warning fails the build.
 - **Distlib drift gate**: CI regenerates both `dist/vani.cyr` and `dist/vani-core.cyr` and rejects any diff against the committed bundles.
-- **Lock-file presence gate**: CI asserts `cyrius.lock` exists before resolving deps — defends supply-chain integrity for the git-pinned yukti dep.
 - **Workflow layout**:
   - [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — build, lint, fmt, vet, distlib drift, test, bench, security pattern scan, docs check; reusable via `workflow_call`
   - [`.github/workflows/release.yml`](.github/workflows/release.yml) — version gate → CI gate → DCE build → artifacts (source tarball, bundled `vani-X.Y.Z.cyr`, smoke ELF, SHA256SUMS)
@@ -460,9 +458,6 @@ artifact and the CI distlib-drift gate verifies it stays in sync
 with `src/`. The `dist/*.deps` sidecars `cyrius distlib` emits
 (cyrius ≥ 6.2.47) are likewise committed — consumers' `cyrius deps`
 reads them to resolve vani's stdlib leaves.
-
-`cyrius.lock` is **NOT** gitignored — it's the supply-chain
-integrity anchor for the git-pinned yukti dep.
 
 ## CHANGELOG Format
 

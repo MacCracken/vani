@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-07-06
+
+**Stable.** The full `vani_*` public surface (106 symbols) is frozen under
+SemVer. This is a **drop-in upgrade** for every existing consumer — no
+consumer-facing breaking changes (see **Breaking** below).
+
+### Added
+
+- **Full-surface consumer validation — `dhvani` 2.1.2.** dhvani's
+  `src/playback.cyr` bridges its f64 `AudioBuffer` ↔ vani's interleaved
+  S16/S24/S32 PCM, exercising the full device path live:
+  `vani_open_playback` / `vani_open_capture`, `vani_ring_new` / `_write` /
+  `_read`, `vani_play` / `vani_play_from_ring`, `vani_record` /
+  `_record_to_ring`, `vani_configure`, `vani_format_new`, `vani_alsa_for`,
+  `vani_start`, `vani_close`. This clears the last v1.0 blocker — before
+  dhvani the full `vani_*` surface had **zero** live-consumer validation
+  (only the 22-symbol `audio_*` core was consumer-proven, via doom /
+  polyomino / bb). The two remaining consumer-unvalidated corners
+  (`vani_open_yukti`, `src/mixer.cyr`) stay internally test-covered.
+- **Core-sink consumer — `mishran` 0.2.0** (the AGNOS software audio mixer /
+  routing daemon) wires vani as its single hardware writer:
+  `msh_router_open` / `_pump` (with `-EPIPE` XRUN recovery) / `_close` over a
+  vendored `vani-core.cyr`. **Verified on real hardware** (2026-07-06); degrades
+  clean without `audio`-group access.
+- **`test_pause_ioctl_encoding`** regression assertion (test count 258 → 259).
+
+### Changed
+
+- **cyrius pin `6.4.3` → `6.4.10`.** The `6.4.x` delta is the SIMD-compute
+  arc (f32/int SIMD, AVX2) — purely additive, unused by vani — plus the
+  6.4.10 top-level-bare-array sizing fix (a **no-op** for vani: all `var X[N]`
+  are function-local) and the bench-CSV µs 10× bug fix (CSV rows trustworthy
+  again). Builds clean on x86_64 / aarch64.
+- **API-surface baseline reflowed + refrozen at 106.** `audio_set_params_full`
+  has been arity **6** since v0.3.0, but its 2-line signature made
+  `cyrius api-surface` mis-record it (`/5`, then drop it entirely). Reflowed
+  to one line so the tool captures `audio_set_params_full/6`; the frozen v1.0
+  baseline (`docs/api-surface.snapshot`) now matches the real surface exactly.
+  **No behavior or arity change** — a tooling/baseline correction only.
+
+### Fixed
+
+- **`SNDRV_PCM_IOCTL_PAUSE` mis-encoded (LOW, dormant).** Was `0x00404145`;
+  kernel `_IOW('A', 0x45, int)` = `0x40044145` (the `64` sat in the size
+  field where the WRITE-dir bit belongs — the WRITEI/READI `_IOC` size-class
+  the 2026-04-30 audit fixed). Harmless today (PAUSE has no wrapper and is
+  never invoked), corrected + regression-pinned so a future `audio_pause()`
+  inherits a correct number. Surfaced by the v1.0 CVE/ABI research sweep.
+
+### Verified
+
+- P(-1) / closeout audit: [`docs/audit/2026-07-06-v1.0.0-audit.md`](docs/audit/2026-07-06-v1.0.0-audit.md).
+- `cyrius test`: **259 passed, 0 failed**. `lint` 0 warnings, `fmt --check`
+  clean, `vet` clean, `distlib` drift byte-clean, `api-surface` 106 exact.
+- ALSA / `sound/*` CVE sweep 2026-05-01 → 2026-07-06: no CVE triggerable
+  through vani's ioctl surface (CVE-2026-53242 `snd_pcm_drain` is
+  reached-but-not-triggerable — vani never links streams; USB / control-ADD
+  CVEs N/A by construction).
+
+### Breaking
+
+- **None for any consumer.** The single pre-1.0 breaking change on record
+  (`vani_open_yukti` `(desc, direction)` → `(desc)`, at v0.3.0) affected a
+  non-functional stub with no consumers. `audio_set_params_full` has been
+  arity 6 since v0.3.0 (the baseline `/5` was a signature-parse artifact, not
+  a real signature). Upgrading from any 0.9.x to 1.0.0 is drop-in.
+
+### Security
+
+- Dormant `SNDRV_PCM_IOCTL_PAUSE` mis-encoding corrected (see **Fixed**).
+- External-data paths re-reviewed: `vani_open_yukti` validates the descriptor
+  and rejects out-of-range direction; XRUN recovery is bounded; ring/format
+  math is bounded by `AUDIO_FRAMES_MAX` / `VANI_RING_MAX_BYTES`.
+
 ## [0.9.9] — 2026-07-04
 
 **Post-fold cleanup — vani is now ALL-STDLIB.** vani 0.9.8 + yukti 2.2.8 + patra

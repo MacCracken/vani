@@ -122,7 +122,6 @@ jobs:
             vani-*.tar.gz
             vani-*.cyr
             vani-*-linux
-            cyrius.lock
             SHA256SUMS
 
   release:
@@ -149,5 +148,4 @@ jobs:
             vani-*.tar.gz
             vani-*.cyr
             vani-*-linux
-            cyrius.lock
             SHA256SUMS

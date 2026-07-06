@@ -1,6 +1,9 @@
 # 0001 — Pin yukti via `[deps.yukti]` git override ahead of cyrius re-bundle
 
-> **Status**: Accepted
+> **Status**: Superseded — the git override was removed at the 0.9.9
+> all-stdlib cut (cyrius ≥ 6.4.3 bundles yukti/patra into stdlib); vani
+> now has zero git deps. This ADR is retained as the historical record
+> of why the override existed 0.3.0–0.9.8.
 > **Date**: 2026-04-30
 > **Authors**: Robert MacCracken
 

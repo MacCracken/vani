@@ -15,7 +15,7 @@ alsa::audio_rate/1
 alsa::audio_read/3
 alsa::audio_resume/1
 alsa::audio_set_params/4
-alsa::audio_set_params_full/5
+alsa::audio_set_params_full/6
 alsa::audio_set_sw_params/4
 alsa::audio_start/1
 alsa::audio_write/3
