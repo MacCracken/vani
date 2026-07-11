@@ -7,6 +7,21 @@ completed work — don't duplicate it here. Latest P(-1) audit at
 `docs/audit/2026-04-30-v0.3.0-audit.md`,
 `docs/audit/2026-04-30-audit.md`).
 
+## Open — P1
+
+- **[P1] Raw Linux-shaped `sys_open` breaks on agnos** — `src/mixer.cyr:87`.
+  Filed 2026-07-08. `var fd = sys_open(path, 2, 0);  # O_RDWR` uses the Linux
+  3-arg shape, but agnos `sys_open` is `(name, namelen, flags)` — so on agnos this
+  passes `namelen = 2` and `flags = 0`, opening a garbage 2-byte path read-only
+  instead of the mixer control node `O_RDWR`. Same conversion family as the cyrius
+  `file_open` / sakshi `_sk_open` `O_RDWR` bug (cyrius
+  `issues/2026-07-08-io-file-open-agnos-rdwr-downgraded-to-wronly.md`). **Fix:**
+  route through the length-carrying wrapper (`file_open`, once its agnos RDWR map
+  is fixed upstream) or add an `#ifdef CYRIUS_TARGET_AGNOS` branch computing
+  `strlen(path)` + `AO_RDWR`. Reviewer to confirm reachability: the agnos audio
+  backend goes through `src/alsa.cyr`'s `sys_snd_*` path, so `mixer.cyr` may be a
+  Linux-only path today — but the site is agnos-incorrect as written regardless.
+
 ## v0.3.0 / v0.9.0 / v0.9.1 — done
 
 - **0.3.0** (released 2026-04-30): yukti integration —

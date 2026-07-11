@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Non-blocking sink API for multi-proc audio — `audio_write_nb` + `audio_avail`.**
+  A blocking `audio_write` holds the CPU with preemption disabled for a whole block
+  on agnos (the kernel cannot preempt a blocking syscall — the shared per-CPU syscall
+  kstack, the *serial-kstack invariant*), which starves a concurrent producer process.
+  `audio_write_nb(dev, buf, frames)` hands the kernel `snd_write`'s NONBLOCK bit
+  (a4 bit0, `sys_snd_write_nb` #66) so it accepts only what fits in the DAC ring right
+  now and returns immediately; `audio_avail(dev)` reports the ring's free frames
+  (`sys_snd_avail` #69, non-blocking). A cooperative caller pairs the two — write when
+  there's room, `sched_yield` #44 to donate the slice when there isn't — so two procs
+  can share the one hardware writer without one blocking the other. agnos-only; on
+  Linux (real preemption) `audio_write_nb` delegates to `audio_write` and `audio_avail`
+  reports "always room" (the blocking write paces). First consumer: the mishran mixer's
+  cooperative `msh_router_pump`, proven two-proc on agnos (client → loopback → mixer →
+  vani → HDA, non-silent wav). No public breaking change — `audio_write` is unchanged.
+
 ## [1.0.0] — 2026-07-06
 
 **Stable.** The full `vani_*` public surface (106 symbols) is frozen under
