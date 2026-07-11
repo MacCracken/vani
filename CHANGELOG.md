@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] — 2026-07-11
+
+### Changed
+
+- **cyrius pin `6.4.10` → `6.4.49`.** Staging bump ahead of the cyrius
+  6.4.50 vani fold-in. The `6.4.10 → 6.4.49` delta is additive from vani's
+  vantage — no source change was required to build clean. Builds + tests
+  green on x86_64, aarch64 (cross), and agnos (`--agnos`).
+- **`dist/vani-core.deps` tightened `15 → 3` stdlib leaves** (`string`,
+  `alloc`, `tagged`). Not a behavior change: 6.4.49's `distlib` records the
+  minimal transitive *roots* for the single-module core profile instead of
+  6.4.10's flattened closure — `alloc`/`string` already pull `syscalls` (and
+  the rest) transitively, so a consumer's `cyrius deps` resolves the identical
+  set. `dist/vani.deps` (full profile) is unchanged at 15. Both `.cyr`
+  bundles are byte-identical to 1.1.0 apart from the version stamp + the
+  mixer fix below.
+
+### Fixed
+
+- **`vani_mixer_open` used the Linux 3-arg `sys_open` shape on agnos (P1,
+  correctness — fails safe today).** `src/mixer.cyr` called
+  `sys_open(path, 2, 0)` unconditionally. On Linux that is
+  `(path, O_RDWR=2, mode=0)` — correct. On agnos `sys_open` is the
+  length-carrying `(name, namelen, flags)` shape, so the same call passed
+  `namelen = 2` / `flags = 0`, mis-opening a 2-byte garbage path `AO_RDONLY`
+  instead of the control node. There is **no `/dev/snd/controlC{N}` on
+  agnos** (the sovereign `snd_*` #64-69 band is output-only, no control
+  surface), so the site could never succeed there and failed for the wrong
+  reason. Fixed by an `#ifdef CYRIUS_TARGET_AGNOS` branch that **fails closed**
+  (`VANI_ERR_MIXER_OPEN`) until a control syscall band lands, mirroring
+  `audio_open_capture`'s agnos branch in `src/alsa.cyr`; the Linux `#else`
+  path is unchanged. Same conversion family as the cyrius `file_open` /
+  sakshi `_sk_open` agnos-RDWR bug. Compile-verified on all three targets;
+  no public API or Linux-behavior change.
+
+### Verified
+
+- Gates under the new pin: `cyrius build` (x86_64 + `--aarch64` ELF +
+  `--agnos`) clean, `cyrius test` **259/259**, `cyrius lint` / `cyrius fmt
+  --check` / `cyrius vet` clean, distlib drift limited to the intended mixer
+  `#ifdef` + version stamp + `core.deps` root-set. `cyrius bench`
+  `ring_200ms_playback` 81.8 µs — within noise of the ~80.9 µs baseline
+  (mixer open touches no bench path). No new ALSA / sound CVEs actioned this
+  patch; the change removes a malformed agnos syscall (net defense-in-depth).
+
 ## [1.1.0] — 2026-07-10
 
 ### Added
