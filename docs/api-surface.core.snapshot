@@ -1,3 +1,4 @@
+alsa::audio_avail/1
 alsa::audio_bit_depth/1
 alsa::audio_can_set_params/4
 alsa::audio_channels/1
@@ -20,3 +21,4 @@ alsa::audio_set_sw_params/4
 alsa::audio_start/1
 alsa::audio_write/3
 alsa::audio_write_bytes/3
+alsa::audio_write_nb/3
