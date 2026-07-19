@@ -1,8 +1,10 @@
 # Vani Development Roadmap
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
-completed work — don't duplicate it here. Latest P(-1) audit at
-`docs/audit/2026-05-01-v0.9.1-audit.md` (priors:
+completed work — don't duplicate it here. Latest audit at
+`docs/audit/2026-07-19-v1.1.2-audit.md` (priors:
+`docs/audit/2026-07-06-v1.0.0-audit.md`,
+`docs/audit/2026-05-01-v0.9.1-audit.md`,
 `docs/audit/2026-04-30-v0.9.0-audit.md`,
 `docs/audit/2026-04-30-v0.3.0-audit.md`,
 `docs/audit/2026-04-30-audit.md`).
@@ -64,6 +66,58 @@ the cyrius side, not here.
       add a small `#ifdef`-dispatched local helper or upstream
       `sys_clock_gettime` to the cyrius stdlib. Lands when an
       aarch64 dev host with real audio HW becomes available.
+
+## v1.2.0 — hardening backlog (filed by the 1.1.2 audit)
+
+All seven were confirmed **pre-existing and byte-identical** before and after the
+1.1.2 toolchain bump — none is a regression, and none justified a source change
+in a patch. Full detail in
+[`docs/audit/2026-07-19-v1.1.2-audit.md`](../audit/2026-07-19-v1.1.2-audit.md).
+
+- [ ] **Guard `alloc()` returns in `vani_ring_new`** (`src/buffer.cyr:47-48`) —
+      both the 40-byte header and the payload are stored unchecked, then `rb`
+      is dereferenced. Bites only on true OOM. Add `if (rb == 0) { return 0; }`
+      plus a checked local for the payload.
+- [ ] **Clamp the kernel-supplied ELEM_INFO `count` in the mixer**
+      (`src/mixer.cyr:167-169`, `:239-241`) — used directly as a `store64`
+      bound into the 1224-byte local `val[1224]` from base 72; first OOB store
+      at `count ≥ 145`. Volume guards only `count == 0`; mute guards nothing.
+      Defense-in-depth, **not a vulnerability** (only the kernel driver sets
+      `count` and it already outranks the caller; USB-audio is capped at
+      `MAX_CHANNELS = 16` upstream). Same class heap-side in
+      `vani_mixer_list_elements` (`:317`, `:340` — trusts `count` then `used`
+      with no cross-check against the allocated cap). Fix: clamp to
+      `VANI_ERR_MIXER_ELEM` above 128, add `used <= count`, pin with a tcyr
+      assertion on `72 + 128*8 <= 1224`.
+- [ ] **Fix the stale `snd_pcm_status` size comment** (`src/alsa.cyr:910`) —
+      it claims "snd_pcm_status is 192 bytes" and `audio_get_state` allocates
+      `var status[192]` (`:920`), but the pinned table at `:79` says 152 and
+      the kernel probe agrees. Over-allocated so it is *safe*, but it is a
+      wrong comment on a UAPI-pinned buffer — the same shape as the PAUSE
+      encoding that rotted unnoticed until v1.0.0. Fix the comment, or shrink
+      to 152 and pin it with a tcyr assertion the way `hwp`/`swp`/`xferi`/`val`
+      already are.
+- [ ] **Add `freelist` / `process` / `patra` to `dist/vani.deps`** — a consumer
+      resolving via `[deps.vani] modules = ["dist/vani.cyr"]` gets 13 cosmetic
+      `undefined function` warnings out of `lib/yukti.cyr`. Builds succeed, all
+      sites DCE-dead; the bundled-stdlib path is unaffected. Fix the sidecar or
+      document it in consumer integration notes.
+- [ ] **Upstream the stdlib-yukti agnos warnings** — vani's `--agnos` build
+      emits 15 warnings, all from `lib/yukti.cyr` (8 duplicate-symbol, 6
+      syscall-arity, 1 undefined `sys_umount2`), all in storage/network
+      enumerators vani never calls, all dead-stripped, and **identical under
+      yukti 2.2.9 and 2.2.10**. A yukti-side fix, not a vani one — track there.
+- [ ] **Extend the distlib drift gate to the `.deps` sidecars**
+      (`.github/workflows/ci.yml:101`) — it currently covers only the two
+      `.cyr` bundles. Effectively self-healing today, since every release bumps
+      the `# Version:` stamp inside both `.cyr` files and that forces a
+      `cyrius distlib` run which rewrites the sidecars in the same operation.
+      Low-value hardening; listed for completeness.
+- [ ] **Optional lint hardening** — cyrlint's deferral counter is independent
+      of its warning counter, so CI's `^\s*warn ` gate cannot see the one
+      untracked deferral at `src/alsa.cyr:806`. vani's "0 warnings" claim is
+      not falsified. Consider `--strict-deferrals`, and cross-reference that
+      comment to a CHANGELOG entry.
 
 ## v0.5.x — hardware coverage (HW-gated)
 

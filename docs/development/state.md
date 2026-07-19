@@ -10,13 +10,13 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `1.1.1` (stable — `vani_*` frozen under SemVer; 1.1.1 is a **patch**: cyrius pin `6.4.10`→`6.4.49` (staging the 6.4.50 fold-in) + the agnos `vani_mixer_open` `sys_open`-shape fix, no API change) |
-| Released | 2026-07-11 |
-| Cyrius toolchain pin | `6.4.49` |
+| Current version | `1.1.2` (stable — `vani_*` frozen under SemVer; 1.1.2 is a **patch**: cyrius pin `6.4.49`→`6.4.67` + the stdlib deps that came with it, **zero source change**, no API change) |
+| Released | 2026-07-19 |
+| Cyrius toolchain pin | `6.4.67` |
 | Dependency model | **all-stdlib** — no git overrides, no `cyrius.lock`. `yukti` + `patra` (and patra's transitive `atomic` / `sync` / `thread_local`) are stdlib modules as of the 0.9.9 all-stdlib cut (cyrius ≥ 6.4.3 bundles vani/yukti/patra) |
 | Distribution profiles | full (`dist/vani.cyr`, 82,799 B / 108 symbols) and core (`dist/vani-core.cyr`, 34,653 B / 24 symbols) |
 | API surface baseline | `docs/api-surface.snapshot` (108 public fns) — the v1.0 freeze grew additively at 1.1.0 (+`audio_write_nb`/`audio_avail`); `docs/api-surface.core.snapshot` (24) |
-| Latest audit | [`docs/audit/2026-07-06-v1.0.0-audit.md`](../audit/2026-07-06-v1.0.0-audit.md) |
+| Latest audit | [`docs/audit/2026-07-19-v1.1.2-audit.md`](../audit/2026-07-19-v1.1.2-audit.md) — toolchain/dep sweep, UAPI re-pin (18 ioctls + 8 struct sizes, 0 mismatches vs kernel 7.1), 8 in-window kernel audio CVEs triaged, clean |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0) |
 
 ## Test / Bench Counts
@@ -26,17 +26,18 @@
 | CPU test assertions | 259 (groups: error, format, buffer, device, yukti, audit-2026-04-30, hw_params, hw_refine, mixer, v0.4.0 state + sw_params) |
 | CPU benchmarks | 13 (format / ring / hwp / negotiate paths) |
 | Real-HW programs | 8 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`) |
-| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row `59dd681` (2026-05-21, v0.9.4). The cyrius bench-CSV µs 10× bug is **fixed in 6.4.10** (`ring_200ms_playback` CSV now `80916` ≈ 80.9 µs, matching human-readable) — CSV rows are trustworthy again and may be appended. |
+| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row `31d5f08` (2026-07-19, v1.1.2) against the prior `59dd681` (2026-05-21, v0.9.4) baseline. The cyrius bench-CSV µs 10× bug is **fixed in 6.4.10** — CSV rows are trustworthy and may be appended. At 1.1.2 `ring_200ms_playback` read 82.7 / 83.6 / 84.1 µs across three runs vs the 82.96 µs baseline; since the compiled bytes are provably identical to 1.1.1's, that spread is machine state, **not** growth-tax. |
 
 ## Build Artifacts
 
 | Artifact | Size | Notes |
 |----------|------|-------|
-| `dist/vani.cyr` (full profile) | 82,799 B / 2251 lines (v1.1.1) | Full consumer-facing bundle: 108 public symbols across alsa/error/format/buffer/device/playback/capture/mixer. Grew from v0.9.1's 76 KB with the 0.9.7 agnos `#ifdef` backend branches, +2 with the 1.1.0 non-blocking sink API, then +11 lines at 1.1.1 with the agnos mixer-open `#ifdef` fail-closed branch. |
-| `dist/vani-core.cyr` (core profile) | 34,653 B / 939 lines (v1.1.1) | Playback-only single-module bundle: 24 `audio_*` symbols from `src/alsa.cyr` only (incl. the agnos backend + the 1.1.0 `audio_write_nb`/`audio_avail` non-blocking pair). Byte-unchanged at 1.1.1 (the mixer fix is not in the core profile; only the version stamp moved). ~58% smaller than full. |
-| `build/vani_smoke` (DCE) | ~308,857 B NOPed at link | x86_64 ELF link-check binary |
-| `build/vani_smoke-aarch64` | (built per cut) | aarch64 ELF link-check binary (since 0.9.0) |
-| `dist/vani.deps` / `dist/vani-core.deps` | 15 / 3 stdlib leaves | cyrius distlib sidecars (auto-generated, consumed by consumers' `cyrius deps`); committed alongside the bundles. 6.4.49 records minimal transitive *roots*: the full profile needs 15, the single-module core profile 3 (`string`/`alloc`/`tagged`; was a flattened 15 under 6.4.10, same resolved closure for consumers). |
+| `dist/vani.cyr` (full profile) | 82,799 B / 2251 lines (v1.1.2) | Full consumer-facing bundle: 108 public symbols across alsa/error/format/buffer/device/playback/capture/mixer. Grew from v0.9.1's 76 KB with the 0.9.7 agnos `#ifdef` backend branches, +2 with the 1.1.0 non-blocking sink API, then +11 lines at 1.1.1 with the agnos mixer-open `#ifdef` fail-closed branch. **Byte-unchanged at 1.1.2** apart from the version stamp (zero source change). |
+| `dist/vani-core.cyr` (core profile) | 34,653 B / 939 lines (v1.1.2) | Playback-only single-module bundle: 24 `audio_*` symbols from `src/alsa.cyr` only (incl. the agnos backend + the 1.1.0 `audio_write_nb`/`audio_avail` non-blocking pair). Byte-unchanged at 1.1.1 and again at 1.1.2 — only the version stamp moved. ~58% smaller than full. |
+| `build/vani_smoke` (DCE) | **468,456 B** binary; 329,475 B NOPed / 1237 unreachable fns (v1.1.2, cyrius 6.4.67) | x86_64 ELF link-check binary. Was 456,072 B / 319,474 B NOPed / 1186 fns under 6.4.49 — the +12,384 B is **pure stdlib growth**, not vani growth (a 2×2 A/B proves cycc version has zero effect on the emitted bytes; see the 1.1.2 audit). Supersedes the `~308,857 B NOPed` figure carried here since v1.0.0, which was already stale at 1.1.1. |
+| `build/vani_smoke-aarch64` | **677,184 B** binary; 528,072 B NOPed / 1237 unreachable fns (v1.1.2) | aarch64 ELF link-check binary (since 0.9.0) — valid stripped ARM aarch64 ELF. |
+| `build/vani_smoke-agnos` | **447,248 B**; 309,989 B NOPed / 1227 unreachable fns (v1.1.2) | agnos target (`--agnos`, not a CI leg). Was 430,768 B / 300,026 B NOPed / 1176 fns under the 6.4.49 stdlib — +16,480 B, the same pure-stdlib-growth story as x86_64 (cycc version is inert here too). Emits 15 warnings, **all from stdlib `lib/yukti.cyr`** and all dead-stripped — identical set under yukti 2.2.9 and 2.2.10; see audit finding #5. |
+| `dist/vani.deps` / `dist/vani-core.deps` | 15 / 3 stdlib leaves | cyrius distlib sidecars (auto-generated, consumed by consumers' `cyrius deps`); committed alongside the bundles. Records minimal transitive *roots*: the full profile needs 15, the single-module core profile 3 (`string`/`alloc`/`tagged`). Unchanged at 1.1.2 under 6.4.67 — no repeat of 1.1.1's `core.deps` 15→3 churn. |
 
 ## Real-HW Verification
 
@@ -44,6 +45,7 @@
 |------|-----------------|--------|
 | Dev box (HDA Generic + HDMI + ACP) | 8 PCM endpoints across cards 0/1/2 | All 8 programs PASS as of 0.3.0 (run inside a desktop audio session — the `/dev/snd/pcm*` nodes are `root:audio`, so a non-session shell without `audio`-group/logind-ACL access sees open-EACCES and the programs degrade clean) |
 | First playback target | card 1 device 0 / `pci:0000:04:00.6:dev0:p` (ALC897 Analog) | `probe`, `devices`, `tone` round-trip clean |
+| Enumerator re-check (1.1.2) | 8 PCM endpoints across cards 0/1/2 | `vani_devices` under **yukti 2.2.10** enumerates all 8 endpoints, matching the documented baseline exactly — the dep bump does not disturb discovery. PCM open returned the documented non-session EACCES (nodes are `root:audio`; shell has no `audio`-group / logind-ACL grant) and every program degraded closed. |
 | **Consumer audible** (cyrius-doom 0.30.5) | card 1 device 0 (ALC897) | **First audible real-HW consumer** (2026-06-29): DOOM SFX play end-to-end through vani at S16_LE / stereo / 44100 |
 | **Consumer sink** (mishran 0.4.1) | card 1 device 0 | `pump_probe` **verified on real HW** (2026-07-06, remote session): router → vani sink open → pump → drain clean. mishran 0.4.1 adds `msh_router_pump_nb` over the new `audio_write_nb`/`audio_avail` — a **non-silent** two-proc tone proven on agnos QEMU (RMS 2146). |
 
@@ -84,6 +86,7 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `1.1.2` | 2026-07-19 | **Patch — toolchain + stdlib dep refresh, zero source change.** cyrius pin `6.4.49` → `6.4.67`; yukti `2.2.9` → `2.2.10` (version stamp only), patra `1.12.9` → `1.12.12` (thread-local slot allocator migration, DCE-dead for vani), plus `alloc`/`chrono`/`io`/`sakshi`/`syscalls*`. Same 40 resolved modules — no new stdlib dependency. A 2×2 `(cycc) × (stdlib)` A/B proves **cycc version has zero effect on vani's emitted bytes**, so every 6.4.50–6.4.67 codegen change is inert; the +12,384 B binary delta is pure stdlib growth. One behavior delta in the whole bump: `ALLOC_MAX` 256 MiB → 2 GiB, reaching `vani_ring_new` only in (256 MiB, 1 GiB] — a window nothing enters, failing safe. Both dist bundles byte-identical apart from the version stamp; API surface holds at 108. 259/259, 0 warnings. UAPI re-pinned (18 ioctls + 8 struct sizes, 0 mismatches vs kernel 7.1), 8 in-window kernel audio CVEs triaged clean. Corrects 1.1.1's "agnos builds clean" — it builds, but with 15 pre-existing stdlib-yukti warnings. |
 | `1.1.1` | 2026-07-11 | **Patch — toolchain + agnos mixer fix.** cyrius pin `6.4.10` → `6.4.49` (staging the 6.4.50 fold-in; no source change needed to build clean). Fixed the P1 agnos `vani_mixer_open` bug: the Linux 3-arg `sys_open(path, 2, 0)` shape mis-opened a 2-byte path on agnos's `(name, namelen, flags)` `sys_open` — now an `#ifdef CYRIUS_TARGET_AGNOS` fail-closed branch (no `/dev/snd/control*` on agnos), mirroring `audio_open_capture`. `dist/vani-core.deps` tightened 15→3 roots. 259/259, 0 warnings; x86_64 / aarch64 / agnos all build clean. |
 | `1.1.0` | 2026-07-10 | **Non-blocking sink API for multi-proc audio.** Added `audio_write_nb` (`snd_write` NONBLOCK #66) + `audio_avail` (`snd_avail` #69) to the core `audio_*` surface — backward-compatible additions (surface 106→108 full / 22→24 core; snapshots updated). Lets a cooperative caller write when the DAC ring has room + `sched_yield` when it doesn't, so two procs share the one hardware writer. First consumer: mishran 0.4.1's `msh_router_pump_nb`, proven two-proc on agnos (client → loopback → mixer → vani → HDA, RMS 2146). agnos-only; Linux delegates to `audio_write`. No breaking change. |
 | `1.0.0` | 2026-07-06 | **Stable.** cyrius pin `6.4.3` → `6.4.10`; full `vani_*` API frozen under SemVer (dhvani 2.1.2 validates the full surface; mishran 0.2.0 wires the core sink). api-surface baseline reflowed + refrozen at 106 (the `audio_set_params_full/5` baseline entry was a 2-line-signature tool artifact — the fn has been arity 6 since 0.3.0; reflowed to one line, corrected to `/6`). 258/258, 0 warnings. |
@@ -98,11 +101,11 @@
 Vani depends on:
 
 ```
-cyrius (6.4.49)
+cyrius (6.4.67)
   └─ stdlib — syscalls / string / alloc / str / fmt / vec / io / fs /
              args / hashmap / tagged / fnptr / freelist / process /
-             chrono / sakshi / yukti / patra / atomic / sync /
-             thread_local
+             chrono / sakshi / yukti (2.2.10) / patra (1.12.12) /
+             atomic / sync / thread_local
 ```
 
 No external (non-cyrius, non-AGNOS) git deps — vani is **all-stdlib** as

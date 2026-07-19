@@ -7,6 +7,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] — 2026-07-19
+
+### Changed
+
+- **cyrius pin `6.4.49` → `6.4.67`.** Toolchain + stdlib refresh only — **zero
+  source lines changed**. Proven inert by a 2×2 A/B over `(cycc version) ×
+  (stdlib snapshot)` with each axis varied independently via hybrid
+  `CYRIUS_HOME` prefixes: the emitted `vani_smoke` is **byte-identical across
+  cycc versions** and depends *only* on the stdlib snapshot
+  (`cycc 6.4.49 + lib 6.4.67` == `cycc 6.4.67 + lib 6.4.67` == 468,456 B;
+  `cycc 6.4.49 + lib 6.4.49` == `cycc 6.4.67 + lib 6.4.49` == 456,072 B; `cmp`
+  clean both ways). Every codegen entry in 6.4.50–6.4.67 — the Win64 ECALLPOPS
+  ≥10-arg fix, the SIMD tail-call and cx forward-call repairs, the f64/f32
+  scalar work, the panic-mode rework — therefore misses vani's emitted bytes
+  entirely. Every syscall wrapper vani calls is byte-identical across the two
+  trees, including *both* `sys_open` shapes (Linux `(path, flags, mode)` and
+  agnos `(name, namelen, flags)` — the 1.1.1 fix stays correctly gated at
+  `src/alsa.cyr:481`, `:501`, `src/mixer.cyr:97`) and the agnos sovereign
+  `sys_snd_*` #64-69 band; `SYS_IOCTL` is unchanged (x86 16 / aarch64 29), so
+  all 20 raw `syscall(SYS_IOCTL, …)` sites (13 in `src/alsa.cyr`, 7 in
+  `src/mixer.cyr`) are untouched — they span 15 distinct ioctl numbers of the
+  18 pinned (`RESET`, `PAUSE` and `CARD_INFO` are pinned but never issued). The
+  new agnos GPU
+  band (#82/#83, which alias `rename`/`mkdir` on Linux) is file-level gated in
+  `lib/syscalls.cyr` and unreachable from vani.
+- **`build/vani_smoke` grew 456,072 → 468,456 B (+12,384, +2.7%) on x86_64**;
+  1186 → 1237 unreachable fns, 319,474 → 329,475 B NOPed. Pure stdlib growth,
+  not vani growth — no vani function moved dead→live. aarch64 is 677,184 B
+  (528,072 B NOPed); agnos grew 430,768 → 447,248 B (+16,480), the same
+  stdlib-growth story. `state.md`'s `~308,857 B NOPed` row was a v1.0.0-era
+  figure already stale at 1.1.1 (true 6.4.49 value: 319,474 B) and is replaced
+  with measured values; the binary size CLAUDE.md names as a release metric is
+  now recorded there for the first time.
+- **`yukti 2.2.9` → `2.2.10`: version stamp only** — the resolved bundle diffs
+  by exactly one line (`# Version:`), so `vani_open_yukti`'s entire call surface
+  is bit-stable. **`patra 1.12.9` → `1.12.12` is genuinely additive** (CAS-gated
+  migration off hardcoded thread-local slots onto cyrius 6.4.65's
+  `thread_local_alloc()`, based at 16), but reaches vani only through yukti's
+  `device_db`, which vani never enters — every `patra_*` symbol and
+  `thread_local_alloc` DCE-strips as dead while the three yukti audio accessors
+  stay live. vani hardcodes no thread-local slot, so the collision class the
+  6.4.65 allocator closes never applied here. **18 of the 40 resolved modules
+  differ** between the two trees; besides yukti and patra the notable ones are
+  `thread_local` (the module carrying that allocator work), `alloc` (+ its
+  `_agnos`/`_macos`/`_windows` variants), `chrono`, `io`, `sakshi`, `syscalls*`,
+  and `args_macos`. Still 40 modules total — no new stdlib dependency, and
+  `[deps] stdlib` in `cyrius.cyml` is unchanged.
+- **One user-visible behavior delta, in a range nothing reaches.** cyrius
+  **6.4.50** raised `ALLOC_MAX` 256 MiB → 2 GiB (`lib/alloc.cyr:169`, `0x10000000` →
+  `0x80000000`), so `vani_ring_new` for capacities in (256 MiB, 1 GiB] — under
+  vani's own `VANI_RING_MAX_BYTES` ceiling of 1 GiB (`src/buffer.cyr:31`) — now
+  allocates for real where it previously returned a ring with a NULL payload.
+  256 MiB is ~23 minutes of 48 kHz stereo S16; no shipped call site and no
+  realistic consumer enters the window, and the change fails in the safe
+  direction. (The stdlib's own inline comment credits v6.4.51; the installed
+  6.4.50 snapshot already carries the new value, so 6.4.50 is the real landing.)
+- **`dist/vani.cyr` and `dist/vani-core.cyr` are byte-identical to 1.1.1 apart
+  from the version stamp** (82,799 B / 2251 lines and 34,653 B / 939 lines,
+  both unchanged); the `.deps` sidecars are unchanged at 15 / 3 leaves — no
+  repeat of 1.1.1's `core.deps` churn. API surface holds at **108** public fns,
+  matching `docs/api-surface.snapshot` exactly — no drift, as a patch requires.
+
+### Verified
+
+- Gates re-run under 6.4.67 from a clean tree (`rm -rf build lib && cyrius
+  deps`): `cyrius test` **259/259**, `cyrius lint` **0 warnings** across all 20
+  gated files, `cyrius fmt` 0 drift, `cyrius vet` `1 deps, 0 untrusted, 0
+  missing`, distlib drift limited to the two version stamps, `CYRIUS_DCE=1`
+  builds clean on x86_64 / aarch64 (valid stripped ARM ELF) / agnos, and all 8
+  real-HW programs build. cyrlint's output is **byte-identical** between 6.4.49
+  and 6.4.67 (3 notes, 1 untracked deferral, 0 warnings under both), so the
+  bump adds no new lint surface and CI's `^\s*warn ` gate is unaffected. CI and
+  release read the pin from `cyrius.cyml` — no hardcoded version in either
+  workflow.
+- Benches within run-to-run noise of the `59dd681` baseline across three runs:
+  `ring_200ms_playback` 82.7 / 83.6 / 84.1 µs (baseline 82.96 µs),
+  `ring_write_64b` 167 ns, `ring_read_64b` 328 ns, `hwp_init_any` 991 ns,
+  `negotiate_format_pick` 10 ns. Since the compiled bytes are provably
+  identical to 1.1.1's, the spread is machine state and is explicitly **not**
+  triaged as growth-tax. New `bench-history.csv` row appended.
+- **ALSA UAPI re-pinned from scratch** against `linux-api-headers 7.1-1`
+  (running kernel 7.1.3): a generated C probe confirms all **18** pinned ioctl
+  numbers and all **8** pinned struct *sizes* match byte-for-byte — **0
+  mismatches**, including the v1.0.0 PAUSE correction. Of those 8, six map to
+  exact in-tree buffers (`hwp[608]`, `swp[136]`, `xferi[24]`, `info[272]`,
+  `list[80]`, `val[1224]`); `snd_ctl_card_info` has no buffer (never issued),
+  and `snd_pcm_status` is over-allocated as `var status[192]` against a real
+  152 — safe, but the comment at `src/alsa.cyr:910` contradicts the correct
+  table entry at `:79` and is filed for 1.2.0. Eight in-window Linux kernel audio
+  CVEs (plus three Windows `usbaudio.sys` ones, N/A — vani has no Windows
+  target) published 2026-06-25 → 2026-07-19; none is triggerable through
+  vani's ioctl surface.
+  Closest approach is CVE-2026-64134 (`sound/core/pcm_lib.c`, bogus `iov_iter`
+  for silencing), doubly unreachable — the kernel gates on
+  `runtime->silence_size > 0` and vani hard-zeroes both `SWP_SILENCE_THRESHOLD`
+  and `SWP_SILENCE_SIZE` in every SW_PARAMS (`src/alsa.cyr:658-659`), and the
+  NULL deref is RISC-V-specific. cyrius itself has zero NVD entries. Full
+  triage in [`docs/audit/2026-07-19-v1.1.2-audit.md`](docs/audit/2026-07-19-v1.1.2-audit.md).
+- Real-HW: `vani_devices` enumerates all **8 PCM endpoints** on the dev box
+  under yukti 2.2.10, matching the documented baseline exactly. PCM open
+  returns the documented non-session EACCES (nodes are `root:audio`; the shell
+  has no `audio`-group / logind-ACL grant), and every program degrades closed —
+  unchanged behavior, not a regression.
+- **Correction to 1.1.1's release note.** 1.1.1 claimed agnos "builds clean".
+  It does build (`OK`), but emits **15 warnings, all originating in stdlib
+  `lib/yukti.cyr`** — 8 duplicate-symbol (`SYS_SOCKET`/`CONNECT`/`BIND`/
+  `RECVFROM`/`SETSOCKOPT`/`PPOLL`/`STATFS`/`NEWFSTATAT`), 6 syscall-arity
+  (`sys_mount` ×3, `sys_rmdir`, `sys_unlink`, `sys_stat`), 1 undefined
+  (`sys_umount2`). All sit in storage/network enumerators vani never calls, all
+  dead-strip, and the set is **identical under yukti 2.2.9 and 2.2.10**
+  (A/B'd via hybrid `CYRIUS_HOME` prefixes) — this bump neither introduced nor
+  fixed any of them. Tracked as an upstream yukti item, not a vani defect.
+
 ## [1.1.1] — 2026-07-11
 
 ### Changed
