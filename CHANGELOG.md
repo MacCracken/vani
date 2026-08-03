@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.3] - 2026-08-02
+
+### Changed — cyrius pin 6.4.67 -> 6.5.5
+
+Toolchain catch-up across the whole desktop stack, cut together so the next burn runs binaries built
+by ONE compiler rather than 6 different ones.
+
+⚠ **The pin was documentation, not enforcement.** `cyrius build` compiles with the INSTALLED `cycc`,
+prints a `toolchain drift` warning, and carries on — so this project was already being built by 6.5.5
+before this bump. Verify provenance with `~/.cyrius/versions/<pin>/bin/cyrius` when it matters.
+
+⭐ What the gap actually contained, for a reader deciding whether to care:
+- **6.5.1** made overload-suffix arity a hard **error** where it used to warn. Latent arity
+  mismatches are now build failures instead of silently-wrong code — good, and the reason this
+  sweep surfaced real defects elsewhere in the stack.
+- **6.4.75** fixed `fn_table` growth past 8192 silently corrupting six fn-indexed side tables.
+- **6.5.0** added file-scoped `private` / per-item `public` — the first real answer to this
+  ecosystem's duplicate-`fn`-silently-shadows hazard.
+- **6.4.82** completed the agnos GPU syscall wrapper band to `#82`-`#95`, so `sys_gpu_shader_op`
+  (#92) and `sys_gpu_modeset_op` (#93) no longer need a raw `syscall()` behind an `#ifdef`.
+
+### Verification
+
+Host + `--agnos` builds green; 1 suite passes; `distlib` regenerated.
+
+
 ## [1.1.2] — 2026-07-19
 
 ### Changed
@@ -181,8 +207,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can share the one hardware writer without one blocking the other. agnos-only; on
   Linux (real preemption) `audio_write_nb` delegates to `audio_write` and `audio_avail`
   reports "always room" (the blocking write paces). First consumer: the mishran mixer's
-  cooperative `msh_router_pump`, proven two-proc on agnos (client → loopback → mixer →
-  vani → HDA, non-silent wav). No public breaking change — `audio_write` is unchanged.
+  cooperative `msh_router_pump`, ~~proven two-proc on agnos (client → loopback → mixer →
+  vani → HDA, non-silent wav)~~. No public breaking change — `audio_write` is unchanged.
+
+  ⛔ **RETRACTED 2026-08-03 — FALSE GREEN, produced by the `MISHRAN_DUPLEX_SELFTEST` kernel
+  hook's `net_ip = 0x7F000001` assignment.** agnos puts `net_ip` in an outbound SYN's SOURCE, so
+  a client dialling 127.0.0.1 on an ordinary boot gets its SYN-ACK addressed to `net_ip`,
+  `tcp_find_conn` never matches, and the connect dies; the hook forced src == dst so the
+  handshake closed only under it. Hook, its `build.sh` define and
+  `mishran-duplex-audio-smoke.sh` are deleted — do not look for the script. **The API shipped in
+  this version is unaffected**: `audio_write_nb` (#66 NONBLOCK) and `audio_avail` (#69) are real,
+  frozen and unchanged, and the single-proc `vanitone` agnos validation elsewhere in this file is
+  honest. What is void is the specific claim that two procs were demonstrated sharing the
+  hardware writer on agnos — that must be re-established over the agnos socket (`naadi`), the
+  local transport that replaces TCP-on-loopback. See agnos
+  `docs/development/planning/ipc.md` §9-§10 and mishran's `[0.4.1]` CHANGELOG retraction.
 
 ## [1.0.0] — 2026-07-06
 
