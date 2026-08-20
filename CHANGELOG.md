@@ -219,7 +219,7 @@ Host + `--agnos` builds green; 1 suite passes; `distlib` regenerated.
   this version is unaffected**: `audio_write_nb` (#66 NONBLOCK) and `audio_avail` (#69) are real,
   frozen and unchanged, and the single-proc `vanitone` agnos validation elsewhere in this file is
   honest. What is void is the specific claim that two procs were demonstrated sharing the
-  hardware writer on agnos — that must be re-established over the agnos socket (`naadi`), the
+  hardware writer on agnos — that must be re-established over the agnos socket (`anu`), the
   local transport that replaces TCP-on-loopback. See agnos
   `docs/development/planning/ipc.md` §9-§10 and mishran's `[0.4.1]` CHANGELOG retraction.
 
