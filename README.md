@@ -17,9 +17,9 @@
 - **Direct ALSA ioctls** — no PulseAudio, no PipeWire, no middleware.
 - **Single audio authority in stdlib** — vani owns the full stack
   from raw ALSA ioctls (`src/alsa.cyr`) up through typed errors,
-  ring buffer, and XRUN recovery. Targeting cyrius 5.8.0 to retire
-  the legacy `lib/audio.cyr` path; consumers will use
-  `include "lib/vani.cyr"` for the entire audio surface.
+  ring buffer, and XRUN recovery. **Done** — cyrius retired the
+  legacy `lib/audio.cyr` path and now bundles vani as `lib/vani.cyr`,
+  so consumers `include "lib/vani.cyr"` for the entire audio surface.
 - **yukti for discovery** — vani never scans `/dev/snd/` itself.
 - **Integer PCM** — no floats in the sample path.
 

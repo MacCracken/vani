@@ -12,76 +12,71 @@ completed work — don't duplicate it here. Latest audit at
 
 ## Open — P1
 
-**UAPI: `enum AlsaHwParam` interval indices are +2 off the kernel spec.**
-Filed by the 1.1.4 sweep (finding H-1,
-[`docs/audit/2026-08-20-v1.1.4-audit.md`](../audit/2026-08-20-v1.1.4-audit.md)).
-`src/alsa.cyr:156-169` numbers all 14 interval-group params two above
-`sound/asound.h` (`CHANNELS` 12 vs 10, `RATE` 13 vs 11, `FIRST_INTERVAL` 10 vs
-8, …). **No wire impact today** — every one of the 12 use sites computes
-`PARAM - FIRST_INTERVAL`, so the offset cancels, and `rmask` is written all-ones
-rather than `1 << PARAM`. But it violates the hard rule that kernel UAPI is the
-spec, and it becomes a live bug the moment anyone writes a selective `rmask` or
-decodes `cmask`. Deliberately **not** fixed in 1.1.4 to keep that patch's
-"emitted bytes moved only because the stdlib moved" proof intact.
-
-Land as a single change with the assertions that would have caught it:
-
-- [ ] Correct the 14 constants to UAPI values (`SAMPLE_BITS`=8 … `TICK_TIME`=19,
-      `FIRST_INTERVAL`=8, `LAST_INTERVAL`=19)
-- [ ] `test_hwparam_index_constants()` — all 17 members vs UAPI literals, plus
-      `LAST_INTERVAL - FIRST_INTERVAL + 1 == 12` and
-      `LAST_MASK - FIRST_MASK + 1 == 3` (the `ii<12` / `mi<3` loop bounds at
-      `src/alsa.cyr:221`/`:212`)
-- [ ] Replace the split size/type ioctl assertions with full 32-bit equality for
-      all 18 — strictly less code, and it catches nr-byte and direction-bit
-      drift that the current split assertions cannot (finding H-4)
-- [ ] `test_ctl_elem_list_field_offsets()` (0/4/8/12/16) and
-      `test_access_constants()` (0/1/3/4) — the two of the 45 unasserted enum
-      members with real consequence (finding H-3)
-- [ ] Fix the stale comments: `snd_pcm_status` 192 → 152 (`src/alsa.cyr:912`,
-      carried from the 1.1.2 audit) and `snd_ctl_elem_list` 280 → 80
-      (`src/alsa.cyr:302-303`) (finding L-1)
-- [ ] Re-run `programs/caps.cyr` on real hardware to confirm negotiated
-      channel/rate ranges are unchanged (needs a desktop seat session — this box
-      currently gets EACCES on `/dev/snd`)
+*None open.* The 1.1.4 sweep's P1 — `enum AlsaHwParam` numbering +2 above the
+kernel UAPI — was **fixed at 1.2.0**, together with every assertion listed
+alongside it (all 19 members pinned against UAPI literals, group-extent
+invariants, resolved interval slots, full 32-bit equality for all 18 ioctls,
+`snd_ctl_elem_list` field offsets, `AlsaAccess`). Verified with a negative
+control: reintroducing the +2 offset fails 14 assertions.
 
 ## Open — P2
 
-**Untrusted-input hardening (both pre-existing, byte-identical to 1.1.3).**
-Filed by the 1.1.4 sweep (findings L-3, L-4).
+Filed by the 1.2.0 P(-1) sweep. Everything here survived adversarial
+re-verification; severities are the post-verification ones.
 
-- [ ] `vani_mixer_list_elements` (`src/mixer.cyr:317-329`) reads the element
-      `count` straight from the ELEM_LIST ioctl with no upper bound, then
-      allocates `count * 64`. Above ~33.5 M that exceeds `ALLOC_MAX`, `alloc`
-      returns 0, and `memset` writes from address 0. Requires a hostile or
-      broken driver, but CLAUDE.md's "do not trust external data (kernel ioctl
-      returns…) without validation" applies directly. Bound it and add a
-      regression assertion.
-- [ ] `vani_ring_new` (`src/buffer.cyr:47-48`) stores into `rb` without checking
-      `alloc`'s 0 sentinel, so total heap exhaustion writes to address 0.
+- [ ] **Handle invalidation on close** (LOW, API/resource-lifetime).
+      `vani_close`, `audio_close` and `vani_mixer_close` leave the descriptor
+      slot populated after closing it, so the handle types are not
+      self-invalidating and close is not idempotent. No in-tree path double-closes;
+      this is hardening for out-of-tree consumers. Zero the fd slot and make a
+      second close a no-op.
+- [ ] **`VANI_ERR_DISCONNECTED` is a dead taxonomy entry** (LOW). No code path
+      constructs it, and `SND_PCM_STATE_DISCONNECTED` (8) is missing from
+      `AlsaPcmState`, so a device unplug is indistinguishable from a transient
+      write error. `src/playback.cyr:5` claims the negative returns map to
+      "XRUN, suspended, disconnected" — two of three are true.
+- [ ] **i64 → u32 truncation on the hw_params interval path** (LOW).
+      `_hwp_interval_set_exact` narrows its i64 argument into the u32
+      `snd_interval.min/max` with no range check, so an out-of-u32 rate or
+      period is silently truncated rather than rejected, while the handle
+      caches the untruncated value. Reject instead of truncating.
+- [ ] **`_hwp_mask_set_value` has no `[0,255]` bound** while its read-side twin
+      `_hwp_mask_has_bit` does (INFO/LOW). Unreachable today — `vani_format_new`
+      stores `alsa_fmt` unvalidated but every in-tree caller passes an enum —
+      confirmed by probe that a violating value writes outside the mask and,
+      past ~4576, outside the 608-byte struct. Enforce the documented precondition.
+- [ ] **Test coverage for the 22 frozen-but-uncalled public symbols.** ADR 0002
+      forbids removing them, so the actionable output is coverage, not deletion.
+      1.2.0 took reference coverage to 97%; these are the residue.
+- [ ] **A seam for XRUN / suspend / short-write paths.** Recovery, resume and
+      partial-transfer branches cannot be exercised without either real hardware
+      or an injectable ioctl seam. The 1.2.0 sweep concluded more assertions
+      cannot reach them — this needs a design decision, not more tests.
 
-**CI does not gate the API surface.** `cyrius_api_surface --scope=project`
-reports 108 matching the snapshot exactly, but nothing runs it in CI — the
-v1.0.0 SemVer freeze is currently enforced by hand. Wire it into
-[`ci.yml`](../../.github/workflows/ci.yml).
+**Declined, recorded so they are not re-litigated** (all assessed in the 1.2.0
+sweep and argued against on the merits):
 
-**Is a PE/Windows build a supported configuration?** cyrius 6.5.25+ made an
-unrouted literal syscall return −38 instead of emitting a raw `0F 05`, and
-6.5.x's `syscalls_windows.cyr` now defines `SYS_IOCTL = 16`. vani's 20 raw
-`syscall(SYS_IOCTL, …)` sites therefore now *compile* for PE and return −ENOSYS
-at runtime, where the build used to fail loudly. Fail-safe, but someone could
-read a clean Windows compile as a working audio path. Decide, and write it down
-in `docs/architecture/` (finding L-5).
-
-**Declined, recorded so it is not re-litigated:** adopting `io.cyr`'s `xopen` /
-`file_open` at the three sites cyrlint flags. All three are inside
-`#ifdef CYRIUS_TARGET_AGNOS` arms that never reach `sys_open`; the lint rule
-does not see the `#ifdef`. Adoption is a functional no-op on Linux and would
-push `dist/vani-core.deps` from 4 leaves to 6 (io pulls `syscalls` + `result`),
-against the core profile's whole purpose (finding L-6).
-
+- Factoring the 17 agnos `#ifdef` seams, the four `val[1224]` mixer preambles,
+  or the EPIPE retry blocks in playback/capture. Each was examined; none
+  improves clarity, and CLAUDE.md's refactor policy says wait for evidence.
+- Removing the five zero-call-site stdlib includes (`args`, `hashmap`, `io`,
+  `fs`, `chrono`) — verified they do not shrink `dist/*.deps`.
+- Adopting `io.cyr`'s `xopen` / `file_open` at the three sites cyrlint flags.
+  All three are inside `#ifdef CYRIUS_TARGET_AGNOS` arms that never reach
+  `sys_open`; adoption is a no-op on Linux and would push
+  `dist/vani-core.deps` from 4 leaves to 6.
+- Deleting the seven now-redundant ioctl sub-assertions. They name the drifting
+  field in the failure message ("HW_PARAMS=608 (got 352…)"), which the
+  full-equality assertions cannot.
 
 ### Closed
+
+**1.2.0 (P(-1) sweep)** closed: the `AlsaHwParam` P1 and all its assertions; the
+`snd_pcm_status` 192→152 item the 1.1.2 audit filed for 1.2.0; the api-surface CI
+gate; the untracked-lint-deferral gate; six duplicate `_puti` copies; the tree's
+one `break`-in-`var`-loop; the eleven stale "cyrius 5.8.0 fold-in is future work"
+claims (it had already completed); and CLAUDE.md's unrunnable closeout step 3.
+
 
 The agnos-incorrect Linux-shaped `sys_open` in `vani_mixer_open`
 (`src/mixer.cyr`, filed 2026-07-08) was **fixed in 1.1.1**: an
@@ -142,57 +137,42 @@ the cyrius side, not here.
       `sys_clock_gettime` to the cyrius stdlib. Lands when an
       aarch64 dev host with real audio HW becomes available.
 
-## v1.2.0 — hardening backlog (filed by the 1.1.2 audit)
+## Hardening backlog filed by the 1.1.2 audit — **6 of 7 DONE**
 
-All seven were confirmed **pre-existing and byte-identical** before and after the
-1.1.2 toolchain bump — none is a regression, and none justified a source change
-in a patch. Full detail in
+All seven were confirmed pre-existing and byte-identical before and after the
+1.1.2 toolchain bump. Detail in
 [`docs/audit/2026-07-19-v1.1.2-audit.md`](../audit/2026-07-19-v1.1.2-audit.md).
 
-- [ ] **Guard `alloc()` returns in `vani_ring_new`** (`src/buffer.cyr:47-48`) —
-      both the 40-byte header and the payload are stored unchecked, then `rb`
-      is dereferenced. Bites only on true OOM. Add `if (rb == 0) { return 0; }`
-      plus a checked local for the payload.
-- [ ] **Clamp the kernel-supplied ELEM_INFO `count` in the mixer**
-      (`src/mixer.cyr:167-169`, `:239-241`) — used directly as a `store64`
-      bound into the 1224-byte local `val[1224]` from base 72; first OOB store
-      at `count ≥ 145`. Volume guards only `count == 0`; mute guards nothing.
-      Defense-in-depth, **not a vulnerability** (only the kernel driver sets
-      `count` and it already outranks the caller; USB-audio is capped at
-      `MAX_CHANNELS = 16` upstream). Same class heap-side in
-      `vani_mixer_list_elements` (`:317`, `:340` — trusts `count` then `used`
-      with no cross-check against the allocated cap). Fix: clamp to
-      `VANI_ERR_MIXER_ELEM` above 128, add `used <= count`, pin with a tcyr
-      assertion on `72 + 128*8 <= 1224`.
-- [ ] **Fix the stale `snd_pcm_status` size comment** (`src/alsa.cyr:910`) —
-      it claims "snd_pcm_status is 192 bytes" and `audio_get_state` allocates
-      `var status[192]` (`:920`), but the pinned table at `:79` says 152 and
-      the kernel probe agrees. Over-allocated so it is *safe*, but it is a
-      wrong comment on a UAPI-pinned buffer — the same shape as the PAUSE
-      encoding that rotted unnoticed until v1.0.0. Fix the comment, or shrink
-      to 152 and pin it with a tcyr assertion the way `hwp`/`swp`/`xferi`/`val`
-      already are.
-- [ ] **Add `freelist` / `process` / `patra` to `dist/vani.deps`** — a consumer
-      resolving via `[deps.vani] modules = ["dist/vani.cyr"]` gets 13 cosmetic
-      `undefined function` warnings out of `lib/yukti.cyr`. Builds succeed, all
-      sites DCE-dead; the bundled-stdlib path is unaffected. Fix the sidecar or
-      document it in consumer integration notes.
-- [ ] **Upstream the stdlib-yukti agnos warnings** — vani's `--agnos` build
-      emits 15 warnings, all from `lib/yukti.cyr` (8 duplicate-symbol, 6
-      syscall-arity, 1 undefined `sys_umount2`), all in storage/network
-      enumerators vani never calls, all dead-stripped, and **identical under
-      yukti 2.2.9 and 2.2.10**. A yukti-side fix, not a vani one — track there.
+- [x] **Guard `alloc()` returns in `vani_ring_new`** — done **1.2.0**. Both the
+      40-byte header and the payload are checked, header first.
+- [x] **Clamp the kernel-supplied ELEM_INFO `count` in the mixer** — done
+      **1.2.0**. Both setters bound `count` against the UAPI extent
+      (`integer.value[]` is 128 longs) and `set_mute` gained the `count == 0`
+      guard it never had. Heap-side, `vani_mixer_list_elements` bounds `count`
+      by `VANI_MIXER_MAX_ELEMS` and **clamps `used` to the allocation** — the
+      1.1.2 filing asked for `used <= count` and that is what shipped. Note the
+      filing's reassurance that "USB-audio is capped at `MAX_CHANNELS = 16`
+      upstream" was not relied on: vani now bounds it regardless of what the
+      driver does.
+- [x] **Fix the stale `snd_pcm_status` size comment** — done **1.2.0**, and
+      taken further than filed: the comment is corrected, the buffer is shrunk
+      192 → 152, a new `AlsaPcmStatusLayout` enum pins size and offsets, the
+      `load64` on the u32 `state` field is narrowed to `load32`, and an
+      assertion ties the ioctl's size bits to the constant.
+- [x] **Add `freelist` / `process` / `patra` to `dist/vani.deps`** — done
+      **1.1.4**; the sidecar went 15 → 21 leaves and the cosmetic
+      `undefined function` warnings are gone on the default resolve path.
+- [x] **Upstream the stdlib-yukti agnos warnings** — resolved upstream. vani's
+      `--agnos` build emits **zero** warnings, and did so at both ends of the
+      1.1.4 bump, so they were fixed before cyrius 6.5.5.
+- [x] **Optional lint hardening** — done **1.1.4**. CI's lint gate now fails on
+      `N untracked deferrals` as well as `warn ` lines, and vani's one
+      untracked deferral was closed.
 - [ ] **Extend the distlib drift gate to the `.deps` sidecars**
-      (`.github/workflows/ci.yml:101`) — it currently covers only the two
-      `.cyr` bundles. Effectively self-healing today, since every release bumps
-      the `# Version:` stamp inside both `.cyr` files and that forces a
-      `cyrius distlib` run which rewrites the sidecars in the same operation.
-      Low-value hardening; listed for completeness.
-- [ ] **Optional lint hardening** — cyrlint's deferral counter is independent
-      of its warning counter, so CI's `^\s*warn ` gate cannot see the one
-      untracked deferral at `src/alsa.cyr:806`. vani's "0 warnings" claim is
-      not falsified. Consider `--strict-deferrals`, and cross-reference that
-      comment to a CHANGELOG entry.
+      (`.github/workflows/ci.yml`) — still open, still low value. It covers only
+      the two `.cyr` bundles. Effectively self-healing today: every release
+      bumps the `# Version:` stamp inside both `.cyr` files, which forces a
+      `cyrius distlib` run that rewrites the sidecars in the same operation.
 
 ## v0.5.x — hardware coverage (HW-gated)
 
@@ -233,7 +213,13 @@ Post-1.0 forward work: USB + HDMI real-HW round-trip (HW-gated, above),
 the yukti-adapter / mixer-control live-consumer validation, and the
 optional stress-bench / portable-clock items.
 
-## Cyrius 5.8.0 fold-in (cross-cut)
+## Cyrius stdlib fold-in (cross-cut) — **DONE**
+
+Verified complete 2026-08-20 (1.2.0 P(-1) sweep): `cyrius/lib/audio.cyr`
+is gone from the toolchain snapshot and cyrius bundles vani as
+`lib/vani.cyr`. Nothing further is owed on either side. The section
+below is the original forward-looking text, retained for the record.
+
 
 Cyrius's roadmap §v5.8.0 commits to bundling vani as a sibling
 distlib alongside mabda / sankoch / sigil / yukti / sandhi.

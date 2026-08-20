@@ -33,7 +33,7 @@ include "lib/sakshi.cyr"
 # Domain modules — order matches [lib].modules in cyrius.cyml
 # ================================================================
 # alsa is the raw ALSA ioctl layer — vani owns this end-to-end
-# (replaces cyrius/lib/audio.cyr; that path retires at cyrius 5.8.0).
+# (replaced cyrius/lib/audio.cyr, which is now retired and gone).
 # error / format / buffer are pure data foundations.
 # device wraps alsa + format + error.
 # playback / capture sit on device + buffer.

@@ -7,6 +7,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-20
+
+Full **P(-1) scaffold-hardening sweep** — audit, refactor, hardening, repair. Cut as a
+**minor** rather than a patch because it adds one public function (`audio_set_params_fmt`)
+to fix a real correctness defect; SemVer says additive surface is a minor, and P(-1) is
+explicitly the pre-minor gate.
+
+Method: five parallel review lenses (CVE research, correctness, memory safety,
+refactor/dead-code, test coverage), then **every non-INFO finding adversarially
+re-verified by an independent agent**. That second pass mattered — it re-rated or
+corrected **50 of 55** findings. Severities below are the post-verification ones, not
+the finders' first estimates, and the audit doc carries the corrections ledger.
+
+### Changed — cyrius pin 6.5.31 → 6.5.32
+
+**Provably inert on both axes**: the 40 resolved stdlib modules are byte-identical
+between the two snapshots, and cycc 6.5.31 and 6.5.32 emit a byte-identical
+`vani_smoke`. Every number in this release is therefore attributable to vani's own
+changes, with no toolchain term to subtract.
+
+### Added
+
+- **`audio_set_params_fmt(dev, rate, channels, alsa_fmt, period, buffer)`** — configure
+  by explicit `AlsaFormat` instead of by bit depth. This is now the real body;
+  `audio_set_params_full` and `audio_set_params` are thin wrappers that pick the default
+  format for a width. Public surface **108 → 109** (core **24 → 25**); both snapshots
+  refreshed. Purely additive — no existing signature changed.
+
+### Fixed
+
+- **The negotiated sample format never reached the kernel** (MEDIUM, `src/device.cyr`).
+  `vani_configure` / `vani_configure_buffered` passed only `vani_format_bit_depth(fmt)`,
+  and the raw layer rebuilt a format from the width via `_alsa_format_for_bits`. That
+  mapping is one-format-per-width, so a caller's explicit `alsa_fmt` was silently
+  replaced: **U8 → S8** (signedness flip), **S16_BE → S16_LE** (byte-order flip),
+  **FLOAT_LE → S32_LE** (float bits read as int). `vani_format_new` takes `alsa_fmt` and
+  `format.cyr`'s own comment says it "encodes signed-ness + endian" — it was then
+  discarded. 3 of 7 supported formats were programmed wrong; anything using the S16_LE
+  default was unaffected, which is why no consumer noticed. Now routed through
+  `audio_set_params_fmt`, with the lossiness of the width mapping pinned by tests so it
+  cannot be "simplified" back.
+
+- **`audio_write_bytes` mis-sized S24_LE frames** (MEDIUM, `src/alsa.cyr`). It computed
+  `channels * (bit_depth / 8)`, giving 3 bytes for S24_LE whose physical width is
+  **4** (24 bits in a 32-bit slot — confirmed against libasound:
+  `snd_pcm_format_physical_width(S24_LE) = 32`). On a stereo stream that made
+  bytes-per-frame 6 instead of 8, so `num_bytes / bpf` requested **33% more frames than
+  the caller's buffer holds** and the kernel read past its end into the DAC. vani's own
+  `vani_bytes_per_sample` had this right since v0.2.0 and the two layers simply
+  disagreed. New `_alsa_phys_bytes_for_bits` fixes the raw layer, and a test now asserts
+  the two layers agree.
+
+- **Ring transfers leaked a scratch buffer on every call** (MEDIUM,
+  `src/playback.cyr` / `src/capture.cyr`). Both `alloc()`d a fresh buffer per call out of
+  a bump allocator that never frees. Reproduced independently by two agents: **~110 MB
+  RSS per 60,000 iterations**, with RSS tracking `alloc_used` ~1:1, so committed memory
+  rather than virtual. The leak rate equals the stream's PCM byte rate exactly — 48 kHz
+  stereo S16_LE is ~691 MB/hour — for any period size, because the zero-work early-out
+  fires before the allocation. Sharpest detail: **dhvani's own `rt-safety.md` annotates
+  that very call site "no alloc"** while it leaked. The buffer now lives on the
+  `VaniDevice` (grown on demand, allocated once in steady state); the handle grew 48 → 64
+  bytes to hold it.
+
+- **`vani_play_from_ring` destroyed audio on any short write** (MEDIUM,
+  `src/playback.cyr`). It called `vani_ring_read` — which *consumes* — **before** issuing
+  the write, so a short write or an XRUN dropped the un-written remainder with no way to
+  recover it. vani's own `programs/vanitone.cyr` documents the short-write contract this
+  violated. Rewritten to peek → write → consume-only-what-was-accepted, via two new
+  private ring helpers (`_vani_ring_peek`, `_vani_ring_advance`). On error nothing is
+  consumed, so the caller keeps its audio and can retry after recovering the device.
+
+- **Kernel-supplied counts drove unbounded loops and allocations** (MEDIUM,
+  `src/mixer.cyr`). `vani_mixer_set_volume` and `vani_mixer_set_mute` looped an
+  unvalidated `ELEM_INFO` count of `store64`s into a 1224-byte **stack** buffer; writes
+  start at +72 in 8-byte steps, so any count above 144 ran off the end. Now bounded
+  against the UAPI extent (`integer.value[]` is 128 longs), which needs no assumption
+  about kernel internals — a count above 128 is already outside the struct vani is
+  filling. `set_mute` additionally had no `count == 0` guard. `vani_mixer_list_elements`
+  gained the same treatment: `count` bounded by a new `VANI_MIXER_MAX_ELEMS` (4096), and
+  `used` **clamped to what was actually allocated** — the array is sized from the count
+  pass but `used` comes from the fill pass, and the card's element set can change between
+  the two ioctls.
+
+- **`vani_record_to_ring` trusted the kernel's frame count** (LOW, `src/capture.cyr`).
+  `snd_xferi.result` was used unclamped as a copy length, so a value above the requested
+  frame count made `vani_ring_write` read past the scratch allocation and push adjacent
+  heap into the caller's audio ring. Requires an ALSA ABI violation by the kernel, hence
+  LOW. Clamped.
+
+- **Null device handles faulted instead of erroring** (LOW, defense-in-depth).
+  `audio_open_*` returns **0** on failure, and 14 `audio_*` plus 7 `vani_*` entry points
+  dereferenced it without a guard while their siblings all had one. The open-then-use
+  sequence documented in `src/alsa.cyr`'s own header comment **SIGSEGV'd — reproduced as
+  exit 139**, and it now exits 0. LOW because no shipped consumer is known to hit it.
+
+- **`vani_ring_new` ignored `alloc()`'s 0 sentinel** (LOW, `src/buffer.cyr`) — total
+  arena exhaustion wrote to address 0. Both allocations now checked. (The wider "16 of 16
+  `alloc()` sites are unchecked" finding was re-scoped on verification: only 7 return raw
+  pointers whose contract vani can honour; the rest cannot be fixed from vani. The
+  reachable ones on the transfer and mixer paths are done.)
+
+- **Stale comments and stale docs.** `snd_pcm_status` was described and buffered as
+  192 bytes (it is **152** — the ioctl already encoded that and the suite already
+  asserted it); `snd_ctl_elem_list` was described as 280 bytes (it is **80**);
+  `audio_get_state` read the 4-byte `state` field with `load64`, pulling `pad1` into the
+  high word — the UAPI documents only `reserved` as zero-filled, so that was unsound
+  rather than untidy. New `AlsaPcmStatusLayout` enum pins the size and offsets, and an
+  assertion ties the ioctl's size bits to the constant so they cannot drift apart again.
+- **The cyrius stdlib fold-in was described as future work in eleven live locations** —
+  README, CLAUDE.md ×4, `src/lib.cyr`, `src/alsa.cyr`, `cyrius.cyml`,
+  `docs/architecture/overview.md`, the roadmap, and the plan doc itself. It **already
+  completed**: `cyrius/lib/audio.cyr` no longer exists in the toolchain snapshot and
+  cyrius bundles vani as `lib/vani.cyr`. All corrected; the plan doc is marked COMPLETED
+  and kept as the historical record.
+- **CLAUDE.md's own closeout step 3 was unrunnable.** "Review the linker's `dead:` lines
+  after smoke build" cannot produce signal — `programs/smoke.cyr` calls nothing but
+  `sys_write`, so all 108 public symbols show up dead. Replaced with the cross-scan that
+  actually works, including the `&fn` fnptr references a bare `name(` grep misses.
+  CLAUDE.md also had the dist sizes inlined (wrong since 1.1.0, and against its own rule
+  that volatile state lives in `state.md`) and named `hwp[608]` as the largest stack
+  allocation when `val[1224]` has been bigger since 0.3.0. The ADR index was missing
+  ADR 0002.
+
+### Changed — refactor
+
+- **`_puti` was byte-identical in six programs** (verified by md5) and carried the
+  `i64::MIN` defect stdlib fixed at **6.4.69**: `n = 0 - n` is a no-op at `i64::MIN`, so
+  the loop never runs and only the sign byte prints. All six deleted; **68 call sites**
+  now use stdlib `fmt_int`. No reachable failure existed — every call site passes small
+  positive values — so this is duplication cleanup, not a bug fix.
+- **`programs/vanitone.cyr` had the tree's only `break` inside a `while` declaring
+  `var`**, a CLAUDE.md hard rule cyrlint cannot see. Rewritten to flag + `continue`.
+  Convention hygiene — no miscompilation was ever observed at any pin vani has shipped.
+  The first rewrite kept `while (w < frames)` and continued on the flag, which spins
+  forever; the shipped version puts the flag in the loop condition, and termination is
+  proved for full-progress, short-write and immediate-stall cases.
+
+**Deliberately not done**, on the reviewers' own recommendation: the 17 agnos `#ifdef`
+seams, the four `val[1224]` mixer preambles and the EPIPE retry blocks are **not**
+factored (each was assessed and argued against); the five zero-call-site stdlib includes
+are **not** removed (verified they do not shrink `dist/*.deps`); the seven now-redundant
+ioctl sub-assertions are **kept** (they name the drifting field in the failure message,
+which the full-equality assertions cannot).
+
+### Added — tests
+
+**259 → 775 assertions.** Reference coverage **33% → 97%** (36/108 → 106/109 functions,
+5/8 → 8/8 files). Every fix above ships with a regression assertion, and the load-bearing
+ones were **validated with negative controls** rather than assumed to work:
+
+| Negative control | Result |
+|---|---|
+| Reintroduce the +2 `AlsaHwParam` offset | 14 assertions fail |
+| Transpose the `HW_PARAMS`/`HW_REFINE` nr byte | 2 fail (old suite: 0) |
+| Flip `WRITEI` from `_IOW` to `_IOR` | 2 fail (old suite: 0) |
+| Revert S24_LE stride to `bit_depth / 8` | 2 fail |
+| Revert the scratch buffer to per-call alloc | 4 fail |
+
+Also corrected here: the **`AlsaHwParam` enum has 19 members, not the 17** the 1.1.4
+audit and the roadmap both claimed.
+
+### Verified
+
+- Gates under pinned genuine **6.5.32**: `cyrius test` **775/775**, `cyrius lint`
+  0 warnings / 0 untracked deferrals across all 20 gated files, `cyrius fmt --check`
+  clean, `cyrius vet` `1 deps, 0 untrusted, 0 missing`, distlib regenerates clean,
+  `CYRIUS_DCE=1` builds clean with **zero warnings** on x86_64 / aarch64 (valid stripped
+  ARM ELF) / agnos, **all 9 programs build**, CI security pattern scan clean.
+- Binary cost of the hardening: x86_64 506,816 → **511,192 B** (+4,376); aarch64
+  744,232 → **744,512**; agnos 489,624 → **494,000**.
+- **Benchmarks flat — and provably so.** `ring_200ms_playback` read 82.9 / 83.2 / 84.3 /
+  84.8 / 85.1 / 85.4 / 88.8 / 90.1 µs across eight runs against the 83.8 µs 1.1.4 row.
+  That spread is machine noise, not variance in vani: the only functions inside the timed
+  batch are `vani_ring_reset` and `vani_ring_write`, and both are **byte-identical to
+  1.1.4** (`vani_ring_new` did change, but is called once outside the timed region). The
+  median run is recorded in `bench-history.csv`.
+- **Downstream**: `cyrius-doom`, `cyrius-polyomino`, `cyrius-bb` and `mishran` all
+  rebuild clean against the 1.2.0 `dist/vani-core.cyr`. `dhvani` fails to build, but
+  **identically with and without the swap** (`undefined function 'http_body'`, which
+  appears nowhere in vani) — pre-existing dhvani-side breakage, not a regression. dhvani
+  still vendors vani 1.0.0.
+- **CVE sweep**: the incremental window since the 1.1.4 sweep (2026-08-20) is **empty and
+  confirmed empty**, not padded. Going deeper found no new exposure: `compat_ioctl` /
+  32-bit is structurally unreachable, ALSA UAPI shows zero drift across every pin vani
+  holds, PulseAudio/PipeWire remain N/A by construction, and cyrius 6.5.31 → 6.5.32 has
+  zero security-tagged changes. **Correction to the 1.1.4 audit**: its "19 new in-window
+  Linux kernel audio CVEs" undercounted — the window holds ~60 after excluding the
+  already-dispositioned 07-19 batch. The disposition (none reachable through vani's ioctl
+  surface) is unchanged.
+
+Full sweep at [`docs/audit/2026-08-20-v1.2.0-audit.md`](docs/audit/2026-08-20-v1.2.0-audit.md).
+
 ## [1.1.4] — 2026-08-20
 
 ### Changed — cyrius pin 6.5.5 → 6.5.31

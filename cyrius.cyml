@@ -5,7 +5,7 @@ description = "vani — audio device I/O for Cyrius. The voice of the system."
 license = "GPL-3.0-only"
 repository = "https://github.com/MacCracken/vani"
 language = "cyrius"
-cyrius = "6.5.31"
+cyrius = "6.5.32"
 
 # vani is a library — no CLI binary. `cyrius build` targets a smoke
 # program that links the full include chain to prove lib.cyr parses
@@ -19,7 +19,7 @@ output = "build/vani_smoke"
 # `[lib]` feeds `cyrius distlib` — module order matters: stdlib first
 # (declared in src/lib.cyr), then domain modules in dependency order.
 # alsa is the raw ALSA ioctl layer (lifted from cyrius/lib/audio.cyr
-# at v0.1.0, retired from stdlib at cyrius 5.8.0); error / format /
+# at v0.1.0; that stdlib path is now retired); error / format /
 # buffer are pure-data foundations; device wraps alsa + format +
 # error; playback / capture sit on device + buffer; mixer is
 # independent (control-device ioctls, not PCM).

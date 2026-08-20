@@ -58,10 +58,20 @@ fn vani_record_to_ring(d, rb, frames): i64 {
     if (ring_cap_frames < frames) { frames = ring_cap_frames; }
     if (frames <= 0) { return vani_err_result(VANI_ERR_BUFFER_FULL); }
     var n_bytes = frames * bpf;
-    var scratch = alloc(n_bytes);
+    # Cached on the device — this alloc'd per call until 1.2.0, leaking
+    # one buffer per read out of a never-freeing bump allocator (H-3).
+    var scratch = _vani_device_scratch(d, n_bytes);
+    if (scratch == 0) { return vani_err_result(VANI_ERR_READ); }
     var res = vani_record(d, scratch, frames);
     if (is_ok(res) == 0) { return res; }
     var got_frames = payload(res);
+    # `got_frames` is the kernel's count from snd_xferi.result. It was
+    # trusted unclamped until 1.2.0: a value above `frames` made
+    # got_bytes exceed the scratch allocation, so vani_ring_write read
+    # past it and pushed adjacent heap into the caller's audio ring.
+    # Clamp to what we actually asked for and sized. Finding H-5.
+    if (got_frames < 0)      { got_frames = 0; }
+    if (got_frames > frames) { got_frames = frames; }
     var got_bytes = got_frames * bpf;
     vani_ring_write(rb, scratch, got_bytes);
     return vani_ok(got_frames);

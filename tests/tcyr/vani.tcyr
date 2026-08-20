@@ -799,6 +799,1364 @@ fn test_negotiate_quality_preference() {
 # Test runner
 # ================================================================
 
+# ================================================================
+# 1.2.0 — UAPI pin hardening (P(-1) sweep)
+# ================================================================
+# The 1.2.0 sweep found `enum AlsaHwParam` had been +2 off the kernel
+# UAPI since v0.2.0 and survived four audits, because not one of its
+# 19 members had an assertion. These tests close that class: every
+# pinned param index, every ioctl as a FULL 32-bit value (the prior
+# split size/type assertions could not see an nr-byte transposition
+# or an _IOR/_IOW flip), and the enum members that were carrying no
+# assertion at all.
+#
+# Every expected value below is the kernel's, transcribed from
+# include/uapi/sound/asound.h — NOT derived from a vani constant.
+# An assertion that routes a constant through a vani helper keyed on
+# the same constant proves nothing; there are none of those here.
+
+# Mask group: ACCESS/FORMAT/SUBFORMAT are 0/1/2, and FIRST_MASK ==
+# ACCESS, LAST_MASK == SUBFORMAT.
+fn test_hwparam_mask_index_constants() {
+    assert_eq(SNDRV_PCM_HW_PARAM_ACCESS,     0, "ACCESS=0");
+    assert_eq(SNDRV_PCM_HW_PARAM_FORMAT,     1, "FORMAT=1");
+    assert_eq(SNDRV_PCM_HW_PARAM_SUBFORMAT,  2, "SUBFORMAT=2");
+    assert_eq(SNDRV_PCM_HW_PARAM_FIRST_MASK, 0, "FIRST_MASK=ACCESS=0");
+    assert_eq(SNDRV_PCM_HW_PARAM_LAST_MASK,  2, "LAST_MASK=SUBFORMAT=2");
+    return 0;
+}
+
+# Interval group: SAMPLE_BITS..TICK_TIME are 8..19 contiguous, with
+# FIRST_INTERVAL == SAMPLE_BITS and LAST_INTERVAL == TICK_TIME.
+# These are the 14 constants that were wrong through 1.1.4.
+fn test_hwparam_interval_index_constants() {
+    assert_eq(SNDRV_PCM_HW_PARAM_SAMPLE_BITS,     8, "SAMPLE_BITS=8");
+    assert_eq(SNDRV_PCM_HW_PARAM_FRAME_BITS,      9, "FRAME_BITS=9");
+    assert_eq(SNDRV_PCM_HW_PARAM_CHANNELS,       10, "CHANNELS=10");
+    assert_eq(SNDRV_PCM_HW_PARAM_RATE,           11, "RATE=11");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIOD_TIME,    12, "PERIOD_TIME=12");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIOD_SIZE,    13, "PERIOD_SIZE=13");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIOD_BYTES,   14, "PERIOD_BYTES=14");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIODS,        15, "PERIODS=15");
+    assert_eq(SNDRV_PCM_HW_PARAM_BUFFER_TIME,    16, "BUFFER_TIME=16");
+    assert_eq(SNDRV_PCM_HW_PARAM_BUFFER_SIZE,    17, "BUFFER_SIZE=17");
+    assert_eq(SNDRV_PCM_HW_PARAM_BUFFER_BYTES,   18, "BUFFER_BYTES=18");
+    assert_eq(SNDRV_PCM_HW_PARAM_TICK_TIME,      19, "TICK_TIME=19");
+    assert_eq(SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,  8, "FIRST_INTERVAL=SAMPLE_BITS=8");
+    assert_eq(SNDRV_PCM_HW_PARAM_LAST_INTERVAL,  19, "LAST_INTERVAL=TICK_TIME=19");
+    return 0;
+}
+
+# Structural invariants tying the enum to the struct layout: the
+# interval array is 12 entries (the ii<12 loop bound in _hwp_init_any)
+# and the mask array is 3 (the mi<3 bound). If someone renumbers the
+# enum without touching the loops, this fires.
+fn test_hwparam_group_extents() {
+    var n_interval = SNDRV_PCM_HW_PARAM_LAST_INTERVAL
+    - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL + 1;
+    var n_mask = SNDRV_PCM_HW_PARAM_LAST_MASK
+    - SNDRV_PCM_HW_PARAM_FIRST_MASK + 1;
+    assert_eq(n_interval, 12, "12 interval params");
+    assert_eq(n_mask,      3, "3 mask params");
+    # The interval array occupies 12 x 12 bytes starting at +260.
+    assert_eq(n_interval * HWP_INTERVAL_BYTES, 144, "interval array is 144 B");
+    assert_eq(HWP_INTERVAL_BASE + 144, 404, "interval array ends at +404");
+    # The mask array occupies 3 x 32 bytes starting at +4.
+    assert_eq(n_mask * HWP_MASK_BYTES, 96, "mask array is 96 B");
+    assert_eq(HWP_MASKS_BASE + 96, 100, "mask array ends at +100");
+    return 0;
+}
+
+# The slots vani actually indexes. This is the direct regression for
+# the 1.1.4 defect: every call site computes PARAM - FIRST_INTERVAL,
+# so a uniform offset error hid itself. Pinning the resulting slot
+# numbers against literals catches it even if both sides shift again.
+fn test_hwparam_interval_slots_resolve() {
+    var first = SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    assert_eq(SNDRV_PCM_HW_PARAM_SAMPLE_BITS  - first, 0, "SAMPLE_BITS slot 0");
+    assert_eq(SNDRV_PCM_HW_PARAM_CHANNELS     - first, 2, "CHANNELS slot 2");
+    assert_eq(SNDRV_PCM_HW_PARAM_RATE         - first, 3, "RATE slot 3");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIOD_SIZE  - first, 5, "PERIOD_SIZE slot 5");
+    assert_eq(SNDRV_PCM_HW_PARAM_PERIODS      - first, 7, "PERIODS slot 7");
+    assert_eq(SNDRV_PCM_HW_PARAM_BUFFER_SIZE  - first, 9, "BUFFER_SIZE slot 9");
+    assert_eq(SNDRV_PCM_HW_PARAM_TICK_TIME    - first, 11, "TICK_TIME slot 11");
+    return 0;
+}
+
+# Full 32-bit ioctl equality. Subsumes size, type, nr AND direction
+# in one assertion each. HW_PARAMS/HW_REFINE differ only in the nr
+# byte, as do DROP/DRAIN — the older split assertions could not tell
+# either pair apart.
+fn test_pcm_ioctl_full_encoding() {
+    assert_eq(SNDRV_PCM_IOCTL_HW_REFINE,     0xC2604110, "HW_REFINE");
+    assert_eq(SNDRV_PCM_IOCTL_HW_PARAMS,     0xC2604111, "HW_PARAMS");
+    assert_eq(SNDRV_PCM_IOCTL_SW_PARAMS,     0xC0884113, "SW_PARAMS");
+    assert_eq(SNDRV_PCM_IOCTL_PREPARE,       0x00004140, "PREPARE");
+    assert_eq(SNDRV_PCM_IOCTL_RESET,         0x00004141, "RESET");
+    assert_eq(SNDRV_PCM_IOCTL_START,         0x00004142, "START");
+    assert_eq(SNDRV_PCM_IOCTL_DROP,          0x00004143, "DROP");
+    assert_eq(SNDRV_PCM_IOCTL_DRAIN,         0x00004144, "DRAIN");
+    assert_eq(SNDRV_PCM_IOCTL_PAUSE,         0x40044145, "PAUSE");
+    assert_eq(SNDRV_PCM_IOCTL_RESUME,        0x00004147, "RESUME");
+    assert_eq(SNDRV_PCM_IOCTL_WRITEI_FRAMES, 0x40184150, "WRITEI_FRAMES");
+    assert_eq(SNDRV_PCM_IOCTL_READI_FRAMES,  0x80184151, "READI_FRAMES");
+    assert_eq(SNDRV_PCM_IOCTL_STATUS,        0x80984120, "STATUS");
+    return 0;
+}
+
+fn test_ctl_ioctl_full_encoding() {
+    assert_eq(SNDRV_CTL_IOCTL_CARD_INFO,  0x81785501, "CARD_INFO");
+    assert_eq(SNDRV_CTL_IOCTL_ELEM_LIST,  0xC0505510, "ELEM_LIST");
+    assert_eq(SNDRV_CTL_IOCTL_ELEM_INFO,  0xC1105511, "ELEM_INFO");
+    assert_eq(SNDRV_CTL_IOCTL_ELEM_READ,  0xC4C85512, "ELEM_READ");
+    assert_eq(SNDRV_CTL_IOCTL_ELEM_WRITE, 0xC4C85513, "ELEM_WRITE");
+    return 0;
+}
+
+# WRITEI is _IOW (dir bits 01) and READI is _IOR (dir bits 10). A
+# flip would make the kernel copy the wrong direction on a 24-byte
+# struct. Direction lives in bits 30..31.
+fn test_pcm_ioctl_direction_bits() {
+    assert_eq((SNDRV_PCM_IOCTL_WRITEI_FRAMES >> 30) & 3, 1, "WRITEI is _IOW");
+    assert_eq((SNDRV_PCM_IOCTL_READI_FRAMES  >> 30) & 3, 2, "READI is _IOR");
+    assert_eq((SNDRV_PCM_IOCTL_STATUS        >> 30) & 3, 2, "STATUS is _IOR");
+    assert_eq((SNDRV_PCM_IOCTL_HW_PARAMS     >> 30) & 3, 3, "HW_PARAMS is _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_HW_REFINE     >> 30) & 3, 3, "HW_REFINE is _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_SW_PARAMS     >> 30) & 3, 3, "SW_PARAMS is _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_PAUSE         >> 30) & 3, 1, "PAUSE is _IOW");
+    assert_eq((SNDRV_PCM_IOCTL_PREPARE       >> 30) & 3, 0, "PREPARE is _IO");
+    assert_eq((SNDRV_PCM_IOCTL_DRAIN         >> 30) & 3, 0, "DRAIN is _IO");
+    return 0;
+}
+
+# snd_ctl_elem_list field offsets. PIDS is where vani hands the
+# kernel a userspace heap pointer to fill (src/mixer.cyr) — a wrong
+# offset would build that pointer out of adjacent u32 fields.
+fn test_ctl_elem_list_field_offsets() {
+    assert_eq(CTL_ELEM_LIST_OFFSET,  0,  "offset at +0");
+    assert_eq(CTL_ELEM_LIST_SPACE,   4,  "space at +4");
+    assert_eq(CTL_ELEM_LIST_USED,    8,  "used at +8");
+    assert_eq(CTL_ELEM_LIST_COUNT,   12, "count at +12");
+    assert_eq(CTL_ELEM_LIST_PIDS,    16, "pids ptr at +16");
+    return 0;
+}
+
+# SND_PCM_ACCESS_* — RW_INTERLEAVED=3 is written into the ACCESS
+# mask on every open. Note the kernel skips 2 (MMAP_COMPLEX).
+fn test_access_constants() {
+    assert_eq(SND_PCM_ACCESS_MMAP_INTERLEAVED,    0, "MMAP_INTERLEAVED=0");
+    assert_eq(SND_PCM_ACCESS_MMAP_NONINTERLEAVED, 1, "MMAP_NONINTERLEAVED=1");
+    assert_eq(SND_PCM_ACCESS_RW_INTERLEAVED,      3, "RW_INTERLEAVED=3");
+    assert_eq(SND_PCM_ACCESS_RW_NONINTERLEAVED,   4, "RW_NONINTERLEAVED=4");
+    return 0;
+}
+
+# Format numbers are wire values written into the FORMAT mask — the
+# kernel interprets them, so they must match the UAPI, not merely
+# vani's own table. The pre-1.2.0 suite only ever compared these
+# through vani helpers keyed on the same constants.
+fn test_alsa_format_literals() {
+    assert_eq(SND_PCM_FORMAT_S8,       0,  "S8=0");
+    assert_eq(SND_PCM_FORMAT_U8,       1,  "U8=1");
+    assert_eq(SND_PCM_FORMAT_S16_LE,   2,  "S16_LE=2");
+    assert_eq(SND_PCM_FORMAT_S16_BE,   3,  "S16_BE=3");
+    assert_eq(SND_PCM_FORMAT_S24_LE,   6,  "S24_LE=6");
+    assert_eq(SND_PCM_FORMAT_S32_LE,   10, "S32_LE=10");
+    assert_eq(SND_PCM_FORMAT_FLOAT_LE, 14, "FLOAT_LE=14");
+    return 0;
+}
+
+fn test_pcm_state_literals() {
+    assert_eq(SND_PCM_STATE_OPEN,      0, "OPEN=0");
+    assert_eq(SND_PCM_STATE_SETUP,     1, "SETUP=1");
+    assert_eq(SND_PCM_STATE_PREPARED,  2, "PREPARED=2");
+    assert_eq(SND_PCM_STATE_RUNNING,   3, "RUNNING=3");
+    assert_eq(SND_PCM_STATE_XRUN,      4, "XRUN=4");
+    assert_eq(SND_PCM_STATE_DRAINING,  5, "DRAINING=5");
+    assert_eq(SND_PCM_STATE_PAUSED,    6, "PAUSED=6");
+    assert_eq(SND_PCM_STATE_SUSPENDED, 7, "SUSPENDED=7");
+    return 0;
+}
+
+fn test_interval_flag_bits() {
+    assert_eq(SND_INTERVAL_OPENMIN, 1, "openmin bit 0");
+    assert_eq(SND_INTERVAL_OPENMAX, 2, "openmax bit 1");
+    assert_eq(SND_INTERVAL_INTEGER, 4, "integer bit 2");
+    assert_eq(SND_INTERVAL_EMPTY,   8, "empty bit 3");
+    assert_eq(SND_PCM_SUBFORMAT_STD, 0, "SUBFORMAT_STD=0");
+    return 0;
+}
+
+# snd_pcm_status is 152 bytes, not the 192 the comment claimed
+# through 1.1.4. The ioctl already encoded 152; now the buffer and
+# the layout constants agree with it.
+fn test_pcm_status_layout() {
+    assert_eq(PCM_STATUS_SIZE,     152, "snd_pcm_status is 152 B");
+    assert_eq(PCM_STATUS_STATE,    0,   "state at +0");
+    assert_eq(PCM_STATUS_APPL_PTR, 40,  "appl_ptr at +40");
+    assert_eq(PCM_STATUS_HW_PTR,   48,  "hw_ptr at +48");
+    assert_eq(PCM_STATUS_DELAY,    56,  "delay at +56");
+    assert_eq(PCM_STATUS_AVAIL,    64,  "avail at +64");
+    # The size encoded in the ioctl must equal the struct size we
+    # allocate for. These drifted apart for four releases.
+    assert_eq((SNDRV_PCM_IOCTL_STATUS >> 16) & 16383, PCM_STATUS_SIZE,
+      "STATUS ioctl size matches PCM_STATUS_SIZE");
+    return 0;
+}
+
+# The mixer element-count ceiling added at 1.2.0. `count` arrives
+# from the kernel and sizes an allocation of count * 64 bytes.
+fn test_mixer_elem_count_bound() {
+    assert_eq(VANI_MIXER_MAX_ELEMS, 4096, "element ceiling");
+    assert(VANI_MIXER_MAX_ELEMS * CTL_ELEM_ID_SIZE < VANI_RING_MAX_BYTES,
+      "bounded allocation stays far under the 1 GiB ring cap");
+    return 0;
+}
+
+# The ring rejects a zero/negative/oversize capacity rather than
+# allocating. Pins the guards vani_ring_new grew at 1.2.0.
+fn test_ring_new_rejects_bad_capacity() {
+    assert_eq(vani_ring_new(0), 0, "capacity 0 rejected");
+    assert_eq(vani_ring_new(0 - 1), 0, "negative capacity rejected");
+    assert_eq(vani_ring_new(VANI_RING_MAX_BYTES + 1), 0, "oversize rejected");
+    var rb = vani_ring_new(1024);
+    assert(rb != 0, "valid capacity accepted");
+    assert(vani_ring_buf(rb) != 0, "payload allocated");
+    assert_eq(vani_ring_size(rb), 1024, "size is pow-of-2 capacity");
+    return 0;
+}
+
+# H-1 regression: physical sample width, not bit_depth / 8. S24_LE
+# is the trap — 24 bits of signal in a 32-bit slot, so 4 bytes.
+fn test_alsa_phys_bytes_for_bits() {
+    assert_eq(_alsa_phys_bytes_for_bits(8),  1, "8-bit -> 1 byte");
+    assert_eq(_alsa_phys_bytes_for_bits(16), 2, "16-bit -> 2 bytes");
+    assert_eq(_alsa_phys_bytes_for_bits(24), 4, "24-bit -> 4 bytes (NOT 3)");
+    assert_eq(_alsa_phys_bytes_for_bits(32), 4, "32-bit -> 4 bytes");
+    assert_eq(_alsa_phys_bytes_for_bits(0),  0, "unknown -> 0 (fail closed)");
+    assert_eq(_alsa_phys_bytes_for_bits(12), 0, "unknown -> 0 (fail closed)");
+    return 0;
+}
+
+# The raw audio_* layer and the vani_* format layer must agree on
+# frame stride. They disagreed for S24_LE from v0.2.0 to 1.1.4, which
+# is what let H-1 through: format.cyr said 4, alsa.cyr said 3.
+fn test_phys_width_agrees_with_format_layer() {
+    assert_eq(_alsa_phys_bytes_for_bits(8),
+      vani_bytes_per_sample(SND_PCM_FORMAT_S8),     "S8 agrees");
+    assert_eq(_alsa_phys_bytes_for_bits(16),
+      vani_bytes_per_sample(SND_PCM_FORMAT_S16_LE), "S16_LE agrees");
+    assert_eq(_alsa_phys_bytes_for_bits(24),
+      vani_bytes_per_sample(SND_PCM_FORMAT_S24_LE), "S24_LE agrees");
+    assert_eq(_alsa_phys_bytes_for_bits(32),
+      vani_bytes_per_sample(SND_PCM_FORMAT_S32_LE), "S32_LE agrees");
+    return 0;
+}
+
+# H-4 regression: the bit_depth -> format mapping is LOSSY, which is
+# why audio_set_params_fmt exists. Pinning the lossiness here so that
+# nobody "simplifies" vani_configure back onto bit_depth.
+fn test_format_for_bits_is_lossy() {
+    # Three formats whose width does NOT round-trip back to themselves.
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_U8), 8, "U8 is 8 bits");
+    assert(_alsa_format_for_bits(8) != SND_PCM_FORMAT_U8,
+      "8 bits does NOT map back to U8 (maps to S8)");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_S16_BE), 16, "S16_BE is 16 bits");
+    assert(_alsa_format_for_bits(16) != SND_PCM_FORMAT_S16_BE,
+      "16 bits does NOT map back to S16_BE (maps to S16_LE)");
+    assert_eq(_alsa_bits_for_format(SND_PCM_FORMAT_FLOAT_LE), 32, "FLOAT_LE is 32 bits");
+    assert(_alsa_format_for_bits(32) != SND_PCM_FORMAT_FLOAT_LE,
+      "32 bits does NOT map back to FLOAT_LE (maps to S32_LE)");
+    return 0;
+}
+
+# The four formats that DO round-trip are the defaults the bit_depth
+# entry points select.
+fn test_format_for_bits_defaults_round_trip() {
+    assert_eq(_alsa_format_for_bits(8),  SND_PCM_FORMAT_S8,     "8 -> S8");
+    assert_eq(_alsa_format_for_bits(16), SND_PCM_FORMAT_S16_LE, "16 -> S16_LE");
+    assert_eq(_alsa_format_for_bits(24), SND_PCM_FORMAT_S24_LE, "24 -> S24_LE");
+    assert_eq(_alsa_format_for_bits(32), SND_PCM_FORMAT_S32_LE, "32 -> S32_LE");
+    assert_eq(_alsa_bits_for_format(_alsa_format_for_bits(8)),  8,  "S8 round-trips");
+    assert_eq(_alsa_bits_for_format(_alsa_format_for_bits(16)), 16, "S16_LE round-trips");
+    assert_eq(_alsa_bits_for_format(_alsa_format_for_bits(24)), 24, "S24_LE round-trips");
+    assert_eq(_alsa_bits_for_format(_alsa_format_for_bits(32)), 32, "S32_LE round-trips");
+    return 0;
+}
+
+# audio_set_params_fmt must reject a format it cannot map to a width,
+# rather than programming a zero bit depth onto the handle.
+fn test_set_params_fmt_rejects_unknown_format() {
+    assert_eq(_alsa_bits_for_format(0 - 1), 0, "unknown format -> 0 bits");
+    assert_eq(_alsa_bits_for_format(99), 0, "unknown format -> 0 bits");
+    return 0;
+}
+
+# H-2 regression: peek must NOT consume, advance must consume exactly,
+# and a partial consume must leave the remainder intact and in order.
+# This is the property vani_play_from_ring depends on to survive a
+# short write; before 1.2.0 it consumed first and lost the remainder.
+fn test_ring_peek_does_not_consume() {
+    var rb = vani_ring_new(64);
+    var src[8];
+    var i = 0;
+    while (i < 8) { store8(&src + i, 65 + i); i = i + 1; }
+    assert_eq(vani_ring_write(rb, &src, 8), 8, "wrote 8");
+    assert_eq(vani_ring_used(rb), 8, "8 used");
+
+    var dst[8];
+    memset(&dst, 0, 8);
+    assert_eq(_vani_ring_peek(rb, &dst, 8), 8, "peeked 8");
+    assert_eq(vani_ring_used(rb), 8, "peek did NOT consume");
+    assert_eq(load8(&dst), 65, "peek copied first byte");
+    assert_eq(load8(&dst + 7), 72, "peek copied last byte");
+
+    # Peek again — same bytes, still nothing consumed.
+    memset(&dst, 0, 8);
+    assert_eq(_vani_ring_peek(rb, &dst, 8), 8, "second peek also 8");
+    assert_eq(load8(&dst), 65, "second peek sees the same data");
+    assert_eq(vani_ring_used(rb), 8, "still 8 used");
+    return 0;
+}
+
+fn test_ring_advance_consumes_exactly() {
+    var rb = vani_ring_new(64);
+    var src[8];
+    var i = 0;
+    while (i < 8) { store8(&src + i, 65 + i); i = i + 1; }
+    vani_ring_write(rb, &src, 8);
+
+    # Simulate a short write: only 3 of the 8 bytes were accepted.
+    assert_eq(_vani_ring_advance(rb, 3), 3, "advanced 3");
+    assert_eq(vani_ring_used(rb), 5, "5 bytes survive the short write");
+
+    # The survivors must be the CORRECT 5, still in order.
+    var dst[8];
+    memset(&dst, 0, 8);
+    assert_eq(_vani_ring_peek(rb, &dst, 5), 5, "peek the remainder");
+    assert_eq(load8(&dst),     68, "remainder starts at 'D'");
+    assert_eq(load8(&dst + 4), 72, "remainder ends at 'H'");
+    return 0;
+}
+
+fn test_ring_advance_clamps() {
+    var rb = vani_ring_new(64);
+    var src[4];
+    memset(&src, 90, 4);
+    vani_ring_write(rb, &src, 4);
+    # Over-advance must clamp, never invert used/free.
+    assert_eq(_vani_ring_advance(rb, 999), 4, "clamped to what is present");
+    assert_eq(vani_ring_used(rb), 0, "ring drained, not inverted");
+    assert_eq(vani_ring_free(rb), 64, "free is the whole ring");
+    assert_eq(_vani_ring_advance(rb, 1), 0, "advance on empty is a no-op");
+    assert_eq(vani_ring_used(rb), 0, "still empty");
+    return 0;
+}
+
+# Peek must follow the same wrap arithmetic as read.
+fn test_ring_peek_wraps() {
+    var rb = vani_ring_new(8);
+    var src[8];
+    memset(&src, 1, 8);
+    vani_ring_write(rb, &src, 8);
+    _vani_ring_advance(rb, 6);          # rpos = 6
+    var s2[6];
+    var i = 0;
+    while (i < 6) { store8(&s2 + i, 65 + i); i = i + 1; }
+    assert_eq(vani_ring_write(rb, &s2, 6), 6, "wrote 6 across the wrap");
+    var dst[8];
+    memset(&dst, 0, 8);
+    assert_eq(_vani_ring_peek(rb, &dst, 8), 8, "peek 8 across the wrap");
+    assert_eq(load8(&dst),     1,  "two old bytes first");
+    assert_eq(load8(&dst + 2), 65, "then the wrapped-in data");
+    assert_eq(load8(&dst + 7), 70, "through the end");
+    assert_eq(vani_ring_used(rb), 8, "peek across a wrap still consumes nothing");
+    return 0;
+}
+
+# H-3 regression: the transfer scratch buffer must be cached on the
+# device, not re-allocated per call. Before 1.2.0 every ring transfer
+# alloc'd a fresh buffer out of a bump allocator that never frees, so
+# steady-state playback leaked one period buffer per period.
+fn test_device_scratch_is_reused() {
+    # A bare 64-byte VaniDevice is enough — _vani_device_scratch only
+    # touches +48 / +56.
+    var d = alloc(64);
+    memset(d, 0, 64);
+
+    var a = _vani_device_scratch(d, 1024);
+    assert(a != 0, "first call allocates");
+    var b = _vani_device_scratch(d, 1024);
+    assert_eq(b, a, "same size returns the SAME buffer (no re-alloc)");
+    var c = _vani_device_scratch(d, 512);
+    assert_eq(c, a, "smaller request reuses the existing buffer");
+    assert_eq(load64(d + 56), 1024, "capacity unchanged by a smaller ask");
+
+    # Growing must hand back a bigger buffer and record the new cap.
+    var e = _vani_device_scratch(d, 4096);
+    assert(e != 0, "grow allocates");
+    assert_eq(load64(d + 56), 4096, "capacity grew to 4096");
+    var f = _vani_device_scratch(d, 4096);
+    assert_eq(f, e, "grown buffer is then reused too");
+    return 0;
+}
+
+fn test_device_scratch_rejects_bad_size() {
+    var d = alloc(64);
+    memset(d, 0, 64);
+    assert_eq(_vani_device_scratch(d, 0), 0, "zero size rejected");
+    assert_eq(_vani_device_scratch(d, 0 - 8), 0, "negative size rejected");
+    assert_eq(load64(d + 48), 0, "no buffer cached after a rejected ask");
+    return 0;
+}
+
+# H-6 regression: the null-handle contract. audio_open_* returns 0 on
+# failure, so every entry point that dereferences the handle must
+# guard it. Before 1.2.0 thirteen audio_* and six vani_* entry points
+# did not, and the open-then-use sequence in src/alsa.cyr's own header
+# comment SIGSEGV'd (reproduced as exit 139).
+#
+# This test IS its own proof: if a guard is removed, the process
+# faults and the suite dies rather than reporting a failure.
+fn test_audio_null_handle_is_safe() {
+    assert_eq(audio_prepare(0),  0 - 1, "audio_prepare(0)");
+    assert_eq(audio_start(0),    0 - 1, "audio_start(0)");
+    assert_eq(audio_drop(0),     0 - 1, "audio_drop(0)");
+    assert_eq(audio_drain(0),    0 - 1, "audio_drain(0)");
+    assert_eq(audio_read(0, 0, 1),  0 - 1, "audio_read(0,..)");
+    assert_eq(audio_get_state(0),   0 - 1, "audio_get_state(0)");
+    assert_eq(audio_fd(0),          0 - 1, "audio_fd(0)");
+    assert_eq(audio_rate(0),        0 - 1, "audio_rate(0)");
+    assert_eq(audio_channels(0),    0 - 1, "audio_channels(0)");
+    assert_eq(audio_bit_depth(0),   0 - 1, "audio_bit_depth(0)");
+    assert_eq(audio_write_bytes(0, 0, 16), 0 - 1, "audio_write_bytes(0,..)");
+    return 0;
+}
+
+fn test_vani_null_handle_is_safe() {
+    assert_eq(is_ok(vani_prepare(0)), 0, "vani_prepare(0) is Err");
+    assert_eq(is_ok(vani_start(0)),   0, "vani_start(0) is Err");
+    assert_eq(is_ok(vani_drain(0)),   0, "vani_drain(0) is Err");
+    assert_eq(is_ok(vani_drop(0)),    0, "vani_drop(0) is Err");
+    assert_eq(is_ok(vani_state(0)),   0, "vani_state(0) is Err");
+    assert_eq(vani_audio_handle(0),   0, "vani_audio_handle(0) is 0, not a fault");
+    assert_eq(is_ok(vani_play(0, 0, 1)),   0, "vani_play(0,..) is Err");
+    assert_eq(is_ok(vani_record(0, 0, 1)), 0, "vani_record(0,..) is Err");
+    assert_eq(is_ok(vani_play_from_ring(0, 0)),   0, "vani_play_from_ring(0,0) is Err");
+    assert_eq(is_ok(vani_record_to_ring(0, 0, 1)), 0, "vani_record_to_ring(0,..) is Err");
+    return 0;
+}
+
+# ================================================================
+# UAPI — hw_param index enum (audit H-1 / H-2)
+# ================================================================
+# `enum AlsaHwParam` is a verbatim mirror of SNDRV_PCM_HW_PARAM_*
+# in include/uapi/sound/asound.h. Nothing derives these numbers —
+# they are copied — so a literal pin is the only thing that can
+# catch drift. Through 1.1.4 the interval group sat +2 above the
+# kernel for four consecutive audits with zero assertions on it.
+
+# The two group extents are hardcoded as loop bounds in
+# _hwp_init_any (`while (mi < 3)`, `while (ii < 12)`, src/alsa.cyr:213,223).
+# If a kernel bump grows either group, the enum and the loops must
+# move together — this is the assertion that ties them.
+
+# Ties the absolute param numbers to the array slots the code
+# actually addresses. Every interval call site computes
+# `PARAM - FIRST_INTERVAL`; this asserts each of those differences
+# resolves to the byte offset the kernel expects. Passes both
+# before and after the 1.1.5 renumber — which is exactly the proof
+# that H-1 had no wire impact.
+fn test_hwparam_slot_offsets_are_uapi_correct() {
+    var base = SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_SAMPLE_BITS  - base), 260,
+      "SAMPLE_BITS slot 0 → +260");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_FRAME_BITS   - base), 272,
+      "FRAME_BITS slot 1 → +272");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_CHANNELS     - base), 284,
+      "CHANNELS slot 2 → +284");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_RATE         - base), 296,
+      "RATE slot 3 → +296");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_PERIOD_TIME  - base), 308,
+      "PERIOD_TIME slot 4 → +308");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_PERIOD_SIZE  - base), 320,
+      "PERIOD_SIZE slot 5 → +320");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_PERIOD_BYTES - base), 332,
+      "PERIOD_BYTES slot 6 → +332");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_PERIODS      - base), 344,
+      "PERIODS slot 7 → +344");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_BUFFER_TIME  - base), 356,
+      "BUFFER_TIME slot 8 → +356");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_BUFFER_SIZE  - base), 368,
+      "BUFFER_SIZE slot 9 → +368");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_BUFFER_BYTES - base), 380,
+      "BUFFER_BYTES slot 10 → +380");
+    assert_eq(_hwp_interval_off(SNDRV_PCM_HW_PARAM_TICK_TIME    - base), 392,
+      "TICK_TIME slot 11 → +392");
+    # Mask params are used absolutely (no subtraction) — pin those too.
+    assert_eq(_hwp_mask_off(SNDRV_PCM_HW_PARAM_ACCESS),    4,  "ACCESS mask +4");
+    assert_eq(_hwp_mask_off(SNDRV_PCM_HW_PARAM_FORMAT),    36, "FORMAT mask +36");
+    assert_eq(_hwp_mask_off(SNDRV_PCM_HW_PARAM_SUBFORMAT), 68, "SUBFORMAT mask +68");
+    return 0;
+}
+
+# ================================================================
+# UAPI — full 32-bit ioctl equality (audit H-4)
+# ================================================================
+# Replaces the size-bits-only and type-byte-only assertions. Those
+# left the nr byte and the direction bits completely unpinned:
+# HW_PARAMS (0xC2604111) and HW_REFINE (0xC2604110) differ ONLY in
+# the nr byte, as do DROP/DRAIN, so swapping either pair passed
+# every prior assertion. An _IOR/_IOW flip on WRITEI/READI likewise
+# passed, while making the kernel copy a 24-byte snd_xferi the
+# wrong way.
+
+# Direction bits (cmd >> 30): 0 = _IO, 1 = _IOW, 2 = _IOR, 3 = _IOWR.
+# Named separately from the equality test so a direction regression
+# reports as a direction regression instead of a hex mismatch.
+fn test_ioctl_direction_bits() {
+    assert_eq((SNDRV_PCM_IOCTL_HW_REFINE     >> 30) & 3, 3, "HW_REFINE _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_HW_PARAMS     >> 30) & 3, 3, "HW_PARAMS _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_SW_PARAMS     >> 30) & 3, 3, "SW_PARAMS _IOWR");
+    assert_eq((SNDRV_PCM_IOCTL_PREPARE       >> 30) & 3, 0, "PREPARE _IO");
+    assert_eq((SNDRV_PCM_IOCTL_RESET         >> 30) & 3, 0, "RESET _IO");
+    assert_eq((SNDRV_PCM_IOCTL_START         >> 30) & 3, 0, "START _IO");
+    assert_eq((SNDRV_PCM_IOCTL_DROP          >> 30) & 3, 0, "DROP _IO");
+    assert_eq((SNDRV_PCM_IOCTL_DRAIN         >> 30) & 3, 0, "DRAIN _IO");
+    assert_eq((SNDRV_PCM_IOCTL_PAUSE         >> 30) & 3, 1, "PAUSE _IOW");
+    assert_eq((SNDRV_PCM_IOCTL_RESUME        >> 30) & 3, 0, "RESUME _IO");
+    assert_eq((SNDRV_PCM_IOCTL_WRITEI_FRAMES >> 30) & 3, 1, "WRITEI _IOW");
+    assert_eq((SNDRV_PCM_IOCTL_READI_FRAMES  >> 30) & 3, 2, "READI _IOR");
+    assert_eq((SNDRV_PCM_IOCTL_STATUS        >> 30) & 3, 2, "STATUS _IOR");
+    assert_eq((SNDRV_CTL_IOCTL_CARD_INFO     >> 30) & 3, 2, "CARD_INFO _IOR");
+    assert_eq((SNDRV_CTL_IOCTL_ELEM_LIST     >> 30) & 3, 3, "ELEM_LIST _IOWR");
+    assert_eq((SNDRV_CTL_IOCTL_ELEM_INFO     >> 30) & 3, 3, "ELEM_INFO _IOWR");
+    assert_eq((SNDRV_CTL_IOCTL_ELEM_READ     >> 30) & 3, 3, "ELEM_READ _IOWR");
+    assert_eq((SNDRV_CTL_IOCTL_ELEM_WRITE    >> 30) & 3, 3, "ELEM_WRITE _IOWR");
+    return 0;
+}
+
+# The three near-collision pairs, stated as intent.
+fn test_ioctl_near_collisions_are_distinct() {
+    assert_neq(SNDRV_PCM_IOCTL_HW_PARAMS, SNDRV_PCM_IOCTL_HW_REFINE,
+      "HW_PARAMS != HW_REFINE (nr byte only)");
+    assert_neq(SNDRV_PCM_IOCTL_DROP, SNDRV_PCM_IOCTL_DRAIN,
+      "DROP != DRAIN (nr byte only)");
+    assert_neq(SNDRV_PCM_IOCTL_WRITEI_FRAMES, SNDRV_PCM_IOCTL_READI_FRAMES,
+      "WRITEI != READI");
+    assert_neq(SNDRV_CTL_IOCTL_ELEM_READ, SNDRV_CTL_IOCTL_ELEM_WRITE,
+      "ELEM_READ != ELEM_WRITE (nr byte only)");
+    return 0;
+}
+
+# ================================================================
+# UAPI — enum value pins that were tautological or absent
+# ================================================================
+# Every assertion below compares to a LITERAL. The pre-1.1.5 suite
+# routed AlsaFormat through vani helpers keyed on the same enum
+# (`assert_eq(_alsa_format_for_bits(8), SND_PCM_FORMAT_S8)`), so a
+# renumber moved both sides together and stayed green.
+
+fn test_ctl_iface_constants_full() {
+    assert_eq(SNDRV_CTL_ELEM_IFACE_CARD,      0, "CARD = 0");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_HWDEP,     1, "HWDEP = 1");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_MIXER,     2, "MIXER = 2");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_PCM,       3, "PCM = 3");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_RAWMIDI,   4, "RAWMIDI = 4");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_TIMER,     5, "TIMER = 5");
+    assert_eq(SNDRV_CTL_ELEM_IFACE_SEQUENCER, 6, "SEQUENCER = 6");
+    return 0;
+}
+
+fn test_ctl_elem_type_constants_full() {
+    assert_eq(SNDRV_CTL_ELEM_TYPE_NONE,       0, "NONE = 0");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_BOOLEAN,    1, "BOOLEAN = 1");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_INTEGER,    2, "INTEGER = 2");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_ENUMERATED, 3, "ENUMERATED = 3");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_BYTES,      4, "BYTES = 4");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_IEC958,     5, "IEC958 = 5");
+    assert_eq(SNDRV_CTL_ELEM_TYPE_INTEGER64,  6, "INTEGER64 = 6");
+    return 0;
+}
+
+# snd_ctl_elem_list. PIDS=16 is the load-bearing one: src/mixer.cyr:334
+# writes a userspace heap pointer there for the kernel to fill. A wrong
+# offset hands the kernel a pointer assembled from the adjacent
+# offset/space/used/count u32 pair.
+
+# The enum-value → mask-bit-position identity, checked behaviourally
+# so a renumber shows up as a wrong bit rather than a matching pair
+# of moved constants.
+fn test_format_and_access_mask_bit_positions() {
+    var hwp = alloc(HWP_SIZE);
+    _hwp_init_any(hwp);
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_S32_LE);
+    assert_eq(load32(hwp + _hwp_mask_off(1)), 1024, "S32_LE → bit 10");
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_FLOAT_LE);
+    assert_eq(load32(hwp + _hwp_mask_off(1)), 16384, "FLOAT_LE → bit 14");
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_FORMAT, SND_PCM_FORMAT_S24_LE);
+    assert_eq(load32(hwp + _hwp_mask_off(1)), 64, "S24_LE → bit 6");
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_ACCESS,
+      SND_PCM_ACCESS_RW_INTERLEAVED);
+    assert_eq(load32(hwp + _hwp_mask_off(0)), 8, "RW_INTERLEAVED → bit 3");
+    _hwp_mask_set_value(hwp, SNDRV_PCM_HW_PARAM_SUBFORMAT,
+      SND_PCM_SUBFORMAT_STD);
+    assert_eq(load32(hwp + _hwp_mask_off(2)), 1, "SUBFORMAT_STD → bit 0");
+    return 0;
+}
+
+# ================================================================
+# Device paths — full string equality
+# ================================================================
+# The prior tests checked two digit bytes at offsets 13/14 and
+# nothing else. A typo anywhere in the 13-byte "/dev/snd/pcmC"
+# prefix, a wrong 'D' separator, or a missing NUL passed all of
+# them — and the path is what selects the hardware.
+
+fn test_devpath_exact_strings() {
+    assert_streq(_audio_devpath(0, 0, 112),   "/dev/snd/pcmC0D0p",   "card0 dev0 playback");
+    assert_streq(_audio_devpath(0, 0, 99),    "/dev/snd/pcmC0D0c",   "card0 dev0 capture");
+    assert_streq(_audio_devpath(1, 0, 112),   "/dev/snd/pcmC1D0p",   "card1 dev0 playback");
+    assert_streq(_audio_devpath(10, 3, 99),   "/dev/snd/pcmC10D3c",  "two-digit card");
+    assert_streq(_audio_devpath(2, 11, 112),  "/dev/snd/pcmC2D11p",  "two-digit device");
+    assert_streq(_audio_devpath(99, 99, 112), "/dev/snd/pcmC99D99p", "both at max");
+    assert_eq(_audio_devpath(0, 100, 112), 0, "device 100 rejected");
+    assert_eq(_audio_devpath(0, 0 - 1, 112), 0, "device -1 rejected");
+    return 0;
+}
+
+fn test_ctl_path_exact_strings() {
+    assert_streq(_vani_ctl_path(0),  "/dev/snd/controlC0",  "controlC0");
+    assert_streq(_vani_ctl_path(1),  "/dev/snd/controlC1",  "controlC1");
+    assert_streq(_vani_ctl_path(42), "/dev/snd/controlC42", "controlC42");
+    assert_streq(_vani_ctl_path(99), "/dev/snd/controlC99", "controlC99");
+    assert_eq(_vani_ctl_path(0 - 1), 0, "card -1 rejected");
+    return 0;
+}
+
+# ================================================================
+# alsa.cyr input guards — reached before any syscall
+# ================================================================
+# Every assertion here exercises a guard that returns before the
+# `#ifdef` split and before any pointer is dereferenced, so it is
+# both target-independent and safe with a null / fake handle.
+# AUDIO_FRAMES_MAX previously existed only as an asserted constant;
+# nothing proved the guard that uses it.
+
+fn test_audio_frame_bounds_reject() {
+    assert_eq(audio_write(0, 0, 0 - 1), 0 - 1, "write rejects negative frames");
+    assert_eq(audio_write(0, 0, AUDIO_FRAMES_MAX + 1), 0 - 1,
+      "write rejects > 2^28 frames");
+    assert_eq(audio_read(0, 0, 0 - 1), 0 - 1, "read rejects negative frames");
+    assert_eq(audio_read(0, 0, AUDIO_FRAMES_MAX + 1), 0 - 1,
+      "read rejects > 2^28 frames");
+    assert_eq(audio_write_nb(0, 0, 0 - 1), 0 - 1, "write_nb rejects negative");
+    assert_eq(audio_write_nb(0, 0, AUDIO_FRAMES_MAX + 1), 0 - 1,
+      "write_nb rejects > 2^28");
+    return 0;
+}
+
+fn test_audio_null_handle_guards() {
+    var hwp = alloc(HWP_SIZE);
+    assert_eq(audio_set_params_full(0, 48000, 2, 16, 0, 0), 0 - 1, "set_params null dev");
+    assert_eq(audio_set_sw_params(0, 1, 1, 1), 0 - 1, "sw_params null dev");
+    assert_eq(audio_query_caps(0, hwp), 0 - 1, "query_caps null dev");
+    assert_eq(audio_resume(0), 0 - 1, "resume null dev");
+    assert_eq(audio_can_set_params(0, 48000, 2, 16), 0 - 1, "can_set_params null dev");
+    assert_eq(audio_close(0), 0, "close(null) is a no-op");
+    return 0;
+}
+
+fn test_audio_param_range_guards() {
+    var fake = alloc(32);
+    store64(fake, 0 - 1);
+    store64(fake + 8, 0);
+    store64(fake + 16, 0);
+    store64(fake + 24, 0);
+    assert_eq(audio_query_caps(fake, 0), 0 - 1, "query_caps null hwp");
+    assert_eq(audio_set_params_full(fake, 0, 2, 16, 0, 0), 0 - 1, "rate 0 rejected");
+    assert_eq(audio_set_params_full(fake, 0 - 1, 2, 16, 0, 0), 0 - 1, "rate -1 rejected");
+    assert_eq(audio_set_params_full(fake, 48000, 0, 16, 0, 0), 0 - 1, "channels 0 rejected");
+    assert_eq(audio_set_sw_params(fake, 0 - 1, 1, 1), 0 - 1, "start_threshold -1");
+    assert_eq(audio_set_sw_params(fake, 1, 0 - 1, 1), 0 - 1, "stop_threshold -1");
+    assert_eq(audio_set_sw_params(fake, 1, 1, 0 - 1), 0 - 1, "avail_min -1");
+    assert_eq(audio_can_set_params(fake, 0, 2, 16), 0 - 1, "can_set rate 0");
+    assert_eq(audio_can_set_params(fake, 48000, 0, 16), 0 - 1, "can_set channels 0");
+    # bit_depth 7 has no AlsaFormat — rejected before any ioctl.
+    assert_eq(audio_can_set_params(fake, 48000, 2, 7), 0, "can_set unknown bit depth → 0");
+    return 0;
+}
+
+# audio_write_bytes derives bytes-per-frame from the handle; a
+# handle that never went through set_params yields bpf 0 and must
+# fail rather than divide by zero.
+fn test_audio_write_bytes_rejects_unconfigured_handle() {
+    var fake = alloc(32);
+    store64(fake, 0 - 1);
+    store64(fake + 8, 0);
+    store64(fake + 16, 0);   # channels 0
+    store64(fake + 24, 0);   # bit_depth 0
+    assert_eq(audio_write_bytes(fake, 0, 1024), 0 - 1, "bpf 0 → -1");
+    return 0;
+}
+
+# The 32-byte audio handle's field offsets, pinned through the
+# accessors. Nothing else in the suite touches them.
+fn test_audio_handle_accessors() {
+    var h = alloc(32);
+    store64(h,      7);
+    store64(h + 8,  48000);
+    store64(h + 16, 2);
+    store64(h + 24, 16);
+    assert_eq(audio_fd(h),        7,     "+0 fd");
+    assert_eq(audio_rate(h),      48000, "+8 rate");
+    assert_eq(audio_channels(h),  2,     "+16 channels");
+    assert_eq(audio_bit_depth(h), 16,    "+24 bit_depth");
+    return 0;
+}
+
+# _ctl_elem_id_get_name reads 44 bytes from id_off + NAME_OFF and
+# NUL-terminates at out+44 — so `out` must be >= 45 bytes. Nothing
+# exercised this reader before.
+fn test_ctl_elem_id_get_name_roundtrip() {
+    var eid = alloc(CTL_ELEM_ID_SIZE);
+    _ctl_elem_id_init(eid, SNDRV_CTL_ELEM_IFACE_MIXER, "Master Playback Switch");
+    var out = alloc(64);
+    memset(out, 65, 64);
+    var got = _ctl_elem_id_get_name(eid, 0, out);
+    assert_eq(got, out, "returns out_buf");
+    assert_streq(out, "Master Playback Switch", "name read back");
+    assert_eq(load8(out + CTL_ELEM_ID_NAME_LEN), 0, "NUL written at +44");
+    return 0;
+}
+
+# ================================================================
+# buffer.cyr — wrap integrity and edges
+# ================================================================
+# test_ring_wraps_around_mask only asserted `used == 8` after a
+# wrapping write. Any mask-arithmetic bug that still moved the right
+# NUMBER of bytes (e.g. `wpos & mask + i`) kept that green while
+# scrambling the audio. This checks the bytes.
+
+fn test_ring_wrap_preserves_byte_order() {
+    var rb = vani_ring_new(8);
+    var src = alloc(8);
+    var i = 0;
+    while (i < 8) { store8(src + i, 10 + i); i = i + 1; }
+    vani_ring_write(rb, src, 8);            # idx 0..7 = 10..17, wpos 8
+    var drain = alloc(8);
+    vani_ring_read(rb, drain, 6);           # rpos 6; 16,17 still live
+    assert_eq(load8(drain + 0), 10, "drained head byte");
+    assert_eq(load8(drain + 5), 15, "drained tail byte");
+    var src2 = alloc(8);
+    var j = 0;
+    while (j < 6) { store8(src2 + j, 20 + j); j = j + 1; }
+    vani_ring_write(rb, src2, 6);           # wpos 8..13 → idx 0..5 (wrapped)
+    assert_eq(vani_ring_used(rb), 8, "full again after wrap");
+    assert_eq(vani_ring_wpos(rb), 14, "wpos is monotonic, not masked");
+    var out = alloc(8);
+    assert_eq(vani_ring_read(rb, out, 8), 8, "read all 8 back");
+    assert_eq(load8(out + 0), 16, "pre-wrap byte 0");
+    assert_eq(load8(out + 1), 17, "pre-wrap byte 1");
+    assert_eq(load8(out + 2), 20, "post-wrap byte 0");
+    assert_eq(load8(out + 3), 21, "post-wrap byte 1");
+    assert_eq(load8(out + 7), 25, "post-wrap last byte");
+    assert_eq(vani_ring_is_empty(rb), 1, "empty after full drain");
+    return 0;
+}
+
+fn test_ring_read_from_empty_and_short_reads() {
+    var rb = vani_ring_new(16);
+    var dst = alloc(16);
+    assert_eq(vani_ring_read(rb, dst, 8), 0, "read from empty returns 0");
+    var src = alloc(16);
+    store8(src, 77);
+    store8(src + 1, 78);
+    vani_ring_write(rb, src, 2);
+    assert_eq(vani_ring_read(rb, dst, 8), 2, "short read caps at used");
+    assert_eq(load8(dst), 77, "byte survived short read");
+    assert_eq(vani_ring_write(rb, src, 0), 0, "zero-length write is 0");
+    assert_eq(vani_ring_read(rb, dst, 0), 0, "zero-length read is 0");
+    return 0;
+}
+
+fn test_ring_min_size_and_accessors() {
+    var rb = vani_ring_new(1);
+    assert_eq(vani_ring_size(rb), 1, "capacity 1 stays 1");
+    assert_eq(vani_ring_mask(rb), 0, "mask = size - 1");
+    assert_nonnull(vani_ring_buf(rb), "backing buffer allocated");
+    var rb3 = vani_ring_new(3);
+    assert_eq(vani_ring_size(rb3), 4,  "3 rounds to 4");
+    assert_eq(vani_ring_mask(rb3), 3,  "mask 3");
+    assert_eq(_next_pow2(1), 1, "next_pow2(1)");
+    assert_eq(_next_pow2(VANI_RING_MAX_BYTES), VANI_RING_MAX_BYTES,
+      "max is already a power of two");
+    return 0;
+}
+
+fn test_ring_max_bytes_constant() {
+    assert_eq(VANI_RING_MAX_BYTES, 1073741824, "cap is exactly 1 GiB");
+    return 0;
+}
+
+# ================================================================
+# device.cyr — handle layout, period grain, null guards
+# ================================================================
+# _vani_device_wrap never executed under the pre-1.1.5 suite, so
+# the 48-byte VaniDevice field offsets were unpinned in both
+# directions: writer and readers could drift together.
+
+fn test_device_wrap_field_projection() {
+    var h = alloc(32);
+    store64(h, 0 - 1);
+    var res = _vani_device_wrap(h, 3, 7, VANI_CAPTURE);
+    assert_eq(is_ok(res), 1, "wrap of a live handle is Ok");
+    var d = payload(res);
+    assert_eq(vani_audio_handle(d), h,            "+0  audio_h");
+    assert_eq(vani_card(d),         3,            "+8  card");
+    assert_eq(vani_device_id(d),    7,            "+16 device");
+    assert_eq(vani_format_get(d),   0,            "+24 format starts null");
+    assert_eq(vani_direction(d),    VANI_CAPTURE, "+32 direction");
+    assert_eq(vani_xrun_count(d),   0,            "+40 xrun starts 0");
+    vani_xrun_inc(d);
+    vani_xrun_inc(d);
+    assert_eq(vani_xrun_count(d), 2, "xrun_inc increments in place");
+    assert_eq(vani_card(d), 3, "xrun_inc did not clobber card");
+    return 0;
+}
+
+fn test_device_wrap_null_handle_is_device_open_err() {
+    var res = _vani_device_wrap(0, 0, 0, VANI_PLAYBACK);
+    assert_eq(is_ok(res), 0, "null audio handle is Err");
+    assert_eq(vani_err_code(payload(res)), VANI_ERR_DEVICE_OPEN,
+      "→ VANI_ERR_DEVICE_OPEN");
+    assert_eq(vani_close(0), 0, "close(null) is a no-op");
+    return 0;
+}
+
+# card > 99 fails inside _audio_devpath, so this reaches
+# VANI_ERR_DEVICE_OPEN without opening anything under /dev/snd.
+fn test_open_rejects_out_of_range_card() {
+    var pres = vani_open_playback(100, 0);
+    assert_eq(is_ok(pres), 0, "playback card 100 is Err");
+    assert_eq(vani_err_code(payload(pres)), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
+    var cres = vani_open_capture(100, 0);
+    assert_eq(is_ok(cres), 0, "capture card 100 is Err");
+    assert_eq(vani_err_code(payload(cres)), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
+    return 0;
+}
+
+# _vani_round_period drives both latency presets; a bug here
+# mis-sizes every period and buffer vani ever negotiates.
+fn test_round_period_grain() {
+    assert_eq(_vani_round_period(0 - 1), 16, "negative clamps to 16");
+    assert_eq(_vani_round_period(0),     16, "zero clamps to 16");
+    assert_eq(_vani_round_period(15),    16, "below grain clamps to 16");
+    assert_eq(_vani_round_period(16),    16, "exact grain unchanged");
+    assert_eq(_vani_round_period(17),    32, "rounds up to next multiple");
+    assert_eq(_vani_round_period(31),    32, "just below rounds up");
+    assert_eq(_vani_round_period(32),    32, "exact multiple unchanged");
+    assert_eq(_vani_round_period(441),   448, "44.1k 10 ms grain");
+    assert_eq(_vani_round_period(480),   480, "48k 10 ms is already aligned");
+    assert_eq(_vani_round_period(705),   720, "44.1k 16 ms grain");
+    assert_eq(_vani_round_period(768),   768, "48k 16 ms is already aligned");
+    return 0;
+}
+
+# The arithmetic the presets perform, pinned independently of the
+# ioctl that consumes it.
+fn test_latency_preset_period_math() {
+    assert_eq(_vani_round_period((VANI_RATE_48K * 10) / 1000), 480,
+      "low-latency period at 48k = 480 frames (10 ms)");
+    assert_eq(_vani_round_period((VANI_RATE_48K * 10) / 1000) * 4, 1920,
+      "low-latency buffer at 48k = 4 periods");
+    assert_eq(_vani_round_period((VANI_RATE_48K * 16) / 1000), 768,
+      "casual period at 48k = 768 frames (16 ms)");
+    assert_eq(_vani_round_period((VANI_RATE_44K * 10) / 1000), 448,
+      "low-latency period at 44.1k rounds 441 → 448");
+    return 0;
+}
+
+fn test_device_null_guards() {
+    var fmt = vani_format_default();
+    assert_eq(vani_err_code(payload(vani_configure(0, fmt))),
+      VANI_ERR_DEVICE_INVALID, "configure null device");
+    assert_eq(vani_err_code(payload(vani_configure_buffered(0, fmt, 0, 0))),
+      VANI_ERR_DEVICE_INVALID, "configure_buffered null device");
+    assert_eq(vani_err_code(payload(vani_set_sw_params(0, 1, 1, 1))),
+      VANI_ERR_DEVICE_INVALID, "set_sw_params null device");
+    assert_eq(vani_err_code(payload(vani_configure_low_latency(0, fmt))),
+      VANI_ERR_DEVICE_INVALID, "low_latency null device");
+    assert_eq(vani_err_code(payload(vani_configure_casual(0, fmt))),
+      VANI_ERR_DEVICE_INVALID, "casual null device");
+    assert_eq(vani_err_code(payload(vani_resume(0))),
+      VANI_ERR_DEVICE_INVALID, "resume null device");
+    assert_eq(vani_err_code(payload(vani_format_negotiate(0, fmt))),
+      VANI_ERR_DEVICE_INVALID, "negotiate null device");
+    assert_eq(vani_format_is_supported(0, fmt), 0, "is_supported null device → 0");
+    return 0;
+}
+
+fn test_device_null_format_guards() {
+    var h = alloc(32);
+    store64(h, 0 - 1);
+    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
+    assert_eq(vani_err_code(payload(vani_configure(d, 0))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "configure null format");
+    assert_eq(vani_err_code(payload(vani_configure_buffered(d, 0, 0, 0))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "configure_buffered null format");
+    assert_eq(vani_err_code(payload(vani_configure_low_latency(d, 0))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "low_latency null format");
+    assert_eq(vani_err_code(payload(vani_configure_casual(d, 0))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "casual null format");
+    assert_eq(vani_err_code(payload(vani_format_negotiate(d, 0))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "negotiate null format");
+    assert_eq(vani_format_is_supported(d, 0), 0, "is_supported null format → 0");
+    return 0;
+}
+
+# ================================================================
+# playback.cyr / capture.cyr — guards reachable without hardware
+# ================================================================
+
+fn test_play_and_record_guards() {
+    var buf = alloc(64);
+    var h = alloc(32);
+    store64(h, 0 - 1);
+    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
+    assert_eq(vani_err_code(payload(vani_play(0, buf, 4))),
+      VANI_ERR_DEVICE_INVALID, "play null device");
+    assert_eq(vani_err_code(payload(vani_play(d, 0, 4))),
+      VANI_ERR_WRITE, "play null buffer → WRITE");
+    var zres = vani_play(d, buf, 0);
+    assert_eq(is_ok(zres), 1, "play 0 frames is Ok");
+    assert_eq(payload(zres), 0, "play 0 frames wrote 0");
+    assert_eq(is_ok(vani_play(d, buf, 0 - 1)), 1, "play negative frames is Ok(0)");
+    assert_eq(vani_err_code(payload(vani_record(0, buf, 4))),
+      VANI_ERR_DEVICE_INVALID, "record null device");
+    assert_eq(vani_err_code(payload(vani_record(d, 0, 4))),
+      VANI_ERR_READ, "record null buffer → READ");
+    var rres = vani_record(d, buf, 0);
+    assert_eq(is_ok(rres), 1, "record 0 frames is Ok");
+    assert_eq(payload(rres), 0, "record 0 frames read 0");
+    return 0;
+}
+
+fn test_play_from_ring_guards() {
+    var rb = vani_ring_new(64);
+    var h = alloc(32);
+    store64(h, 0 - 1);
+    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
+    assert_eq(vani_err_code(payload(vani_play_from_ring(0, rb))),
+      VANI_ERR_DEVICE_INVALID, "null device");
+    assert_eq(vani_err_code(payload(vani_play_from_ring(d, 0))),
+      VANI_ERR_WRITE, "null ring → WRITE");
+    # format still 0 on the handle — unconfigured device.
+    assert_eq(vani_err_code(payload(vani_play_from_ring(d, rb))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "unconfigured device");
+    # A format whose alsa_fmt has no byte width yields bpf 0.
+    store64(d + 24, vani_format_new(48000, 2, 16, 99));
+    assert_eq(vani_err_code(payload(vani_play_from_ring(d, rb))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "bpf 0 → FORMAT_UNSUPPORTED");
+    # Valid format, empty ring — returns Ok(0) before touching the device.
+    store64(d + 24, vani_format_default());
+    var eres = vani_play_from_ring(d, rb);
+    assert_eq(is_ok(eres), 1, "empty ring is Ok");
+    assert_eq(payload(eres), 0, "empty ring wrote 0 frames");
+    # Fewer bytes than one frame is also a no-op, not a short write.
+    var src = alloc(4);
+    vani_ring_write(rb, src, 3);
+    var pres = vani_play_from_ring(d, rb);
+    assert_eq(is_ok(pres), 1, "sub-frame residue is Ok");
+    assert_eq(payload(pres), 0, "sub-frame residue wrote 0 frames");
+    return 0;
+}
+
+# The only producer of VANI_ERR_BUFFER_FULL anywhere in vani, and
+# it is reachable with no device at all.
+fn test_record_to_ring_guards() {
+    var h = alloc(32);
+    store64(h, 0 - 1);
+    var d = payload(_vani_device_wrap(h, 0, 0, VANI_CAPTURE));
+    var rb = vani_ring_new(8);
+    assert_eq(vani_err_code(payload(vani_record_to_ring(0, rb, 1))),
+      VANI_ERR_DEVICE_INVALID, "null device");
+    assert_eq(vani_err_code(payload(vani_record_to_ring(d, 0, 1))),
+      VANI_ERR_READ, "null ring → READ");
+    assert_eq(vani_err_code(payload(vani_record_to_ring(d, rb, 1))),
+      VANI_ERR_FORMAT_UNSUPPORTED, "unconfigured device");
+    store64(d + 24, vani_format_default());   # bpf = 4
+    var src = alloc(8);
+    vani_ring_write(rb, src, 8);              # ring is now full
+    assert_eq(vani_ring_is_full(rb), 1, "ring full");
+    assert_eq(vani_err_code(payload(vani_record_to_ring(d, rb, 4))),
+      VANI_ERR_BUFFER_FULL, "full ring → BUFFER_FULL");
+    return 0;
+}
+
+# ================================================================
+# mixer.cyr — guards and list projection
+# ================================================================
+
+fn test_mixer_open_rejects_bad_card() {
+    var r100 = vani_mixer_open(100);
+    assert_eq(is_ok(r100), 0, "card 100 is Err");
+    assert_eq(vani_err_code(payload(r100)), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
+    var rneg = vani_mixer_open(0 - 1);
+    assert_eq(is_ok(rneg), 0, "card -1 is Err");
+    assert_eq(vani_err_code(payload(rneg)), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
+    assert_eq(vani_mixer_close(0), 0, "close(null) is a no-op");
+    return 0;
+}
+
+fn test_mixer_handle_accessors() {
+    var m = alloc(16);
+    store64(m, 9);
+    store64(m + 8, 5);
+    assert_eq(vani_mixer_fd(m),   9, "+0 fd");
+    assert_eq(vani_mixer_card(m), 5, "+8 card");
+    return 0;
+}
+
+fn test_mixer_elem_guards() {
+    var m = alloc(16);
+    store64(m, 0 - 1);
+    store64(m + 8, 0);
+    assert_eq(vani_err_code(payload(vani_mixer_set_volume(0, "Master", 50))),
+      VANI_ERR_MIXER_ELEM, "set_volume null mixer");
+    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, 0, 50))),
+      VANI_ERR_MIXER_ELEM, "set_volume null element name");
+    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, "Master", 0 - 1))),
+      VANI_ERR_MIXER_ELEM, "set_volume percent -1");
+    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, "Master", 101))),
+      VANI_ERR_MIXER_ELEM, "set_volume percent 101");
+    assert_eq(vani_err_code(payload(vani_mixer_get_volume(0, "Master"))),
+      VANI_ERR_MIXER_ELEM, "get_volume null mixer");
+    assert_eq(vani_err_code(payload(vani_mixer_get_volume(m, 0))),
+      VANI_ERR_MIXER_ELEM, "get_volume null element name");
+    assert_eq(vani_err_code(payload(vani_mixer_set_mute(0, "Master", 1))),
+      VANI_ERR_MIXER_ELEM, "set_mute null mixer");
+    assert_eq(vani_err_code(payload(vani_mixer_set_mute(m, 0, 1))),
+      VANI_ERR_MIXER_ELEM, "set_mute null element name");
+    assert_eq(vani_err_code(payload(vani_mixer_get_mute(0, "Master"))),
+      VANI_ERR_MIXER_ELEM, "get_mute null mixer");
+    assert_eq(vani_err_code(payload(vani_mixer_get_mute(m, 0))),
+      VANI_ERR_MIXER_ELEM, "get_mute null element name");
+    assert_eq(vani_err_code(payload(vani_mixer_list_elements(0))),
+      VANI_ERR_MIXER_ELEM, "list_elements null mixer");
+    return 0;
+}
+
+# The 24-byte VaniMixerList handle and the 64-byte stride into the
+# kernel-filled snd_ctl_elem_id array. Nothing pinned either.
+fn test_mixer_list_layout_constants() {
+    assert_eq(VANI_LIST_SIZE,     24, "list handle is 24 bytes");
+    assert_eq(VANI_LIST_COUNT,    0,  "count at +0");
+    assert_eq(VANI_LIST_PIDS,     8,  "pids at +8");
+    assert_eq(VANI_LIST_CAPACITY, 16, "capacity at +16");
+    return 0;
+}
+
+fn test_mixer_list_accessors() {
+    var pids = alloc(2 * CTL_ELEM_ID_SIZE);
+    memset(pids, 0, 2 * CTL_ELEM_ID_SIZE);
+    _ctl_elem_id_init(pids, SNDRV_CTL_ELEM_IFACE_MIXER, "Master Playback Volume");
+    _ctl_elem_id_init(pids + CTL_ELEM_ID_SIZE, SNDRV_CTL_ELEM_IFACE_MIXER,
+      "PCM Playback Volume");
+    var lh = alloc(VANI_LIST_SIZE);
+    store64(lh + VANI_LIST_COUNT, 2);
+    store64(lh + VANI_LIST_PIDS, pids);
+    store64(lh + VANI_LIST_CAPACITY, 2 * CTL_ELEM_ID_SIZE);
+    assert_eq(vani_mixer_list_count(lh), 2,    "count");
+    assert_eq(vani_mixer_list_pids(lh),  pids, "pids");
+    assert_eq(vani_mixer_list_id_at(lh, 0), pids, "element 0 at base");
+    assert_eq(vani_mixer_list_id_at(lh, 1), pids + 64, "element 1 at +64 stride");
+    assert_eq(vani_mixer_list_id_at(lh, 2), 0, "index == count rejected");
+    assert_eq(vani_mixer_list_id_at(lh, 0 - 1), 0, "negative index rejected");
+    var name = alloc(64);
+    assert_streq(vani_mixer_list_name(lh, 0, name), "Master Playback Volume",
+      "name of element 0");
+    assert_streq(vani_mixer_list_name(lh, 1, name), "PCM Playback Volume",
+      "name of element 1");
+    assert_eq(vani_mixer_list_name(lh, 9, name), 0, "out-of-range name → 0");
+    return 0;
+}
+
+# ================================================================
+# error.cyr — the code table, exhaustively
+# ================================================================
+# VaniErrCode is vani's published error ABI. Prior coverage was five
+# inequality pairs; nothing pinned a value, and 20 of the 24 names
+# could have returned "unknown error" undetected.
+
+fn test_err_code_values() {
+    assert_eq(VANI_ERR_NONE,                 0,  "NONE");
+    assert_eq(VANI_ERR_DEVICE_OPEN,          1,  "DEVICE_OPEN");
+    assert_eq(VANI_ERR_DEVICE_BUSY,          2,  "DEVICE_BUSY");
+    assert_eq(VANI_ERR_DEVICE_INVALID,       3,  "DEVICE_INVALID");
+    assert_eq(VANI_ERR_HW_PARAMS,            4,  "HW_PARAMS");
+    assert_eq(VANI_ERR_SW_PARAMS,            5,  "SW_PARAMS");
+    assert_eq(VANI_ERR_FORMAT_UNSUPPORTED,   6,  "FORMAT_UNSUPPORTED");
+    assert_eq(VANI_ERR_RATE_UNSUPPORTED,     7,  "RATE_UNSUPPORTED");
+    assert_eq(VANI_ERR_CHANNELS_UNSUPPORTED, 8,  "CHANNELS_UNSUPPORTED");
+    assert_eq(VANI_ERR_PREPARE,              9,  "PREPARE");
+    assert_eq(VANI_ERR_START,                10, "START");
+    assert_eq(VANI_ERR_WRITE,                11, "WRITE");
+    assert_eq(VANI_ERR_READ,                 12, "READ");
+    assert_eq(VANI_ERR_UNDERRUN,             13, "UNDERRUN");
+    assert_eq(VANI_ERR_OVERRUN,              14, "OVERRUN");
+    assert_eq(VANI_ERR_SUSPENDED,            15, "SUSPENDED");
+    assert_eq(VANI_ERR_DISCONNECTED,         16, "DISCONNECTED");
+    assert_eq(VANI_ERR_MIXER_OPEN,           17, "MIXER_OPEN");
+    assert_eq(VANI_ERR_MIXER_ELEM,           18, "MIXER_ELEM");
+    assert_eq(VANI_ERR_BUFFER_FULL,          19, "BUFFER_FULL");
+    assert_eq(VANI_ERR_BUFFER_EMPTY,         20, "BUFFER_EMPTY");
+    assert_eq(VANI_ERR_BUFFER_SIZE,          21, "BUFFER_SIZE");
+    assert_eq(VANI_ERR_YUKTI_DESCRIPTOR,     22, "YUKTI_DESCRIPTOR");
+    assert_eq(VANI_ERR_OTHER,                99, "OTHER sentinel");
+    return 0;
+}
+
+fn test_err_names_exhaustive() {
+    assert_streq(vani_err_name(VANI_ERR_NONE),                 "none", "NONE");
+    assert_streq(vani_err_name(VANI_ERR_DEVICE_OPEN),          "device open failed", "DEVICE_OPEN");
+    assert_streq(vani_err_name(VANI_ERR_DEVICE_BUSY),          "device busy", "DEVICE_BUSY");
+    assert_streq(vani_err_name(VANI_ERR_DEVICE_INVALID),       "device invalid", "DEVICE_INVALID");
+    assert_streq(vani_err_name(VANI_ERR_HW_PARAMS),            "hw params failed", "HW_PARAMS");
+    assert_streq(vani_err_name(VANI_ERR_SW_PARAMS),            "sw params failed", "SW_PARAMS");
+    assert_streq(vani_err_name(VANI_ERR_FORMAT_UNSUPPORTED),   "format unsupported", "FORMAT_UNSUPPORTED");
+    assert_streq(vani_err_name(VANI_ERR_RATE_UNSUPPORTED),     "rate unsupported", "RATE_UNSUPPORTED");
+    assert_streq(vani_err_name(VANI_ERR_CHANNELS_UNSUPPORTED), "channels unsupported", "CHANNELS_UNSUPPORTED");
+    assert_streq(vani_err_name(VANI_ERR_PREPARE),              "prepare failed", "PREPARE");
+    assert_streq(vani_err_name(VANI_ERR_START),                "start failed", "START");
+    assert_streq(vani_err_name(VANI_ERR_WRITE),                "write failed", "WRITE");
+    assert_streq(vani_err_name(VANI_ERR_READ),                 "read failed", "READ");
+    assert_streq(vani_err_name(VANI_ERR_UNDERRUN),             "underrun", "UNDERRUN");
+    assert_streq(vani_err_name(VANI_ERR_OVERRUN),              "overrun", "OVERRUN");
+    assert_streq(vani_err_name(VANI_ERR_SUSPENDED),            "suspended", "SUSPENDED");
+    assert_streq(vani_err_name(VANI_ERR_DISCONNECTED),         "disconnected", "DISCONNECTED");
+    assert_streq(vani_err_name(VANI_ERR_MIXER_OPEN),           "mixer open failed", "MIXER_OPEN");
+    assert_streq(vani_err_name(VANI_ERR_MIXER_ELEM),           "mixer element error", "MIXER_ELEM");
+    assert_streq(vani_err_name(VANI_ERR_BUFFER_FULL),          "ring buffer full", "BUFFER_FULL");
+    assert_streq(vani_err_name(VANI_ERR_BUFFER_EMPTY),         "ring buffer empty", "BUFFER_EMPTY");
+    assert_streq(vani_err_name(VANI_ERR_BUFFER_SIZE),          "ring buffer size invalid", "BUFFER_SIZE");
+    assert_streq(vani_err_name(VANI_ERR_YUKTI_DESCRIPTOR),     "yukti descriptor invalid", "YUKTI_DESCRIPTOR");
+    assert_streq(vani_err_name(VANI_ERR_OTHER),                "other error", "OTHER");
+    assert_streq(vani_err_name(55), "unknown error", "unmapped code falls through");
+    return 0;
+}
+
+fn test_err_recoverable_exhaustive() {
+    var code = 0;
+    var rec = 0;
+    while (code <= VANI_ERR_YUKTI_DESCRIPTOR) {
+        rec = rec + vani_err_is_recoverable(code);
+        code = code + 1;
+    }
+    assert_eq(rec, 3, "exactly 3 of codes 0..22 are recoverable");
+    assert_eq(vani_err_is_recoverable(VANI_ERR_OTHER), 0, "OTHER is fatal");
+    assert_eq(vani_err_is_recoverable(55), 0, "unmapped code is fatal");
+    return 0;
+}
+
+fn test_err_result_helpers() {
+    var ok = vani_ok(42);
+    assert_eq(is_ok(ok), 1, "vani_ok is Ok");
+    assert_eq(payload(ok), 42, "vani_ok carries the value");
+    var e = vani_err_result(VANI_ERR_DEVICE_BUSY);
+    assert_eq(is_ok(e), 0, "vani_err_result is Err");
+    assert_eq(vani_err_code(payload(e)), VANI_ERR_DEVICE_BUSY, "code preserved");
+    assert_eq(vani_err_detail(payload(e)), 0, "no detail");
+    var em = vani_err_result_msg(VANI_ERR_OTHER, "context string");
+    assert_eq(is_ok(em), 0, "vani_err_result_msg is Err");
+    assert_eq(vani_err_code(payload(em)), VANI_ERR_OTHER, "code preserved");
+    assert_streq(vani_err_detail(payload(em)), "context string", "detail preserved");
+    return 0;
+}
+
+fn test_observability_toggle_defaults_silent() {
+    assert_eq(vani_observability_is_enabled(), 0, "silent by default");
+    vani_observability_enable();
+    assert_eq(vani_observability_is_enabled(), 1, "enable() sets the flag");
+    vani_observability_disable();
+    assert_eq(vani_observability_is_enabled(), 0, "disable() clears it");
+    return 0;
+}
+
+# ================================================================
+# format.cyr — rate constants, pinned to literals
+# ================================================================
+# vani_format_cd asserted `rate == VANI_RATE_44K` against a struct
+# built from VANI_RATE_44K — a pure round-trip. These are the
+# literals.
+
+fn test_vani_rate_constants() {
+    assert_eq(VANI_RATE_8K,   8000,   "8 kHz");
+    assert_eq(VANI_RATE_16K,  16000,  "16 kHz");
+    assert_eq(VANI_RATE_22K,  22050,  "22.05 kHz");
+    assert_eq(VANI_RATE_32K,  32000,  "32 kHz");
+    assert_eq(VANI_RATE_44K,  44100,  "44.1 kHz");
+    assert_eq(VANI_RATE_48K,  48000,  "48 kHz");
+    assert_eq(VANI_RATE_88K,  88200,  "88.2 kHz");
+    assert_eq(VANI_RATE_96K,  96000,  "96 kHz");
+    assert_eq(VANI_RATE_176K, 176400, "176.4 kHz");
+    assert_eq(VANI_RATE_192K, 192000, "192 kHz");
+    return 0;
+}
+
+# S24_LE is the awkward case — 24 bits of signal in a 32-bit slot.
+# Pin the frame math against literals so a bytes-per-sample change
+# cannot hide behind the enum.
+fn test_frame_math_against_literals() {
+    var f24 = vani_format_new(96000, 6, 24, SND_PCM_FORMAT_S24_LE);
+    assert_eq(vani_bytes_per_frame(f24), 24, "6ch * 4B (S24 in 32) = 24");
+    assert_eq(vani_frames_to_bytes(f24, 100), 2400, "100 frames");
+    assert_eq(vani_bytes_to_frames(f24, 2400), 100, "2400 bytes");
+    assert_eq(vani_ms_to_frames(f24, 10), 960, "10 ms at 96 kHz");
+    var fbad = vani_format_new(48000, 2, 16, 99);
+    assert_eq(vani_bytes_per_frame(fbad), 0, "unknown format → bpf 0");
+    assert_eq(vani_bytes_to_frames(fbad, 4096), 0, "bpf 0 → 0 frames, no divide");
+    assert_eq(vani_alsa_for(7, 1), 0 - 1, "unknown bit depth → -1");
+    return 0;
+}
+
+# ================================================================
+# ERROR PATHS DRIVEN THROUGH A CLOSED DESCRIPTOR
+# ================================================================
+# These use fd = -1, so every ioctl returns -EBADF deterministically.
+# No /dev/snd node is opened, no permissions are needed, and the
+# result is identical on any Linux box and in CI. This is the only
+# way to reach the ioctl-failure branches of vani_configure,
+# vani_set_sw_params, vani_prepare, vani_start, vani_resume and
+# vani_format_negotiate without hardware.
+#
+# LINUX/AARCH64 ONLY — the CYRIUS_TARGET_AGNOS arms of these
+# functions return success no-ops. CI runs `cyrius test` on the
+# native target only, so this group is safe as written; if a
+# `cyrius test --agnos` leg is ever added, wrap the group in
+# `#ifdef CYRIUS_TARGET_AGNOS` / `#else`.
+
+fn _test_bad_fd_device(): i64 {
+    var h = alloc(32);
+    store64(h, 0 - 1);        # fd = -1 → every ioctl returns -EBADF
+    store64(h + 8, 0);
+    store64(h + 16, 0);
+    store64(h + 24, 0);
+    return payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
+}
+
+fn test_ioctl_failure_maps_to_hw_and_sw_params() {
+    var d = _test_bad_fd_device();
+    var fmt = vani_format_default();
+    assert_eq(vani_err_code(payload(vani_configure(d, fmt))),
+      VANI_ERR_HW_PARAMS, "HW_PARAMS ioctl failure → VANI_ERR_HW_PARAMS");
+    assert_eq(vani_format_get(d), 0,
+      "format NOT cached when HW_PARAMS fails");
+    assert_eq(vani_err_code(payload(vani_configure_buffered(d, fmt, 480, 1920))),
+      VANI_ERR_HW_PARAMS, "buffered configure failure → HW_PARAMS");
+    assert_eq(vani_err_code(payload(vani_set_sw_params(d, 1, 1920, 480))),
+      VANI_ERR_SW_PARAMS, "SW_PARAMS ioctl failure → VANI_ERR_SW_PARAMS");
+    assert_eq(vani_err_code(payload(vani_configure_low_latency(d, fmt))),
+      VANI_ERR_HW_PARAMS, "low-latency preset propagates HW_PARAMS");
+    assert_eq(vani_err_code(payload(vani_configure_casual(d, fmt))),
+      VANI_ERR_HW_PARAMS, "casual preset propagates HW_PARAMS");
+    return 0;
+}
+
+fn test_ioctl_failure_maps_to_prepare_start_resume() {
+    var d = _test_bad_fd_device();
+    assert_eq(vani_err_code(payload(vani_prepare(d))),
+      VANI_ERR_PREPARE, "PREPARE ioctl failure → VANI_ERR_PREPARE");
+    assert_eq(vani_err_code(payload(vani_start(d))),
+      VANI_ERR_START, "START ioctl failure → VANI_ERR_START");
+    # RESUME fails, so vani_resume falls back to PREPARE, which also
+    # fails — the documented -ENOSYS fallback path, exercised.
+    assert_eq(vani_err_code(payload(vani_resume(d))),
+      VANI_ERR_PREPARE, "resume falls back to prepare, reports PREPARE");
+    assert_lt(vani_drain(d), 0, "drain propagates the raw negative");
+    assert_lt(vani_drop(d),  0, "drop propagates the raw negative");
+    return 0;
+}
+
+fn test_state_query_failure_is_unknown() {
+    var d = _test_bad_fd_device();
+    assert_eq(vani_state(d), 0 - 1, "STATUS ioctl failure → raw -1");
+    assert_eq(vani_state_typed(d), VANI_STATE_UNKNOWN,
+      "raw -1 maps to VANI_STATE_UNKNOWN");
+    assert_eq(audio_is_running(vani_audio_handle(d)), 0,
+      "a device we cannot query is not running");
+    return 0;
+}
+
+fn test_write_failure_without_xrun_is_write_err() {
+    var d = _test_bad_fd_device();
+    var buf = alloc(64);
+    # audio_write fails, the STATUS probe also fails (state -1, neither
+    # XRUN nor SUSPENDED), so neither recovery arm is taken.
+    assert_eq(vani_err_code(payload(vani_play(d, buf, 4))),
+      VANI_ERR_WRITE, "non-XRUN write failure → VANI_ERR_WRITE");
+    assert_eq(vani_xrun_count(d), 0, "xrun counter NOT incremented");
+    assert_eq(vani_err_code(payload(vani_record(d, buf, 4))),
+      VANI_ERR_READ, "non-XRUN read failure → VANI_ERR_READ");
+    assert_eq(vani_xrun_count(d), 0, "xrun counter still 0 after read failure");
+    return 0;
+}
+
+fn test_negotiate_failure_maps_to_hw_params() {
+    var d = _test_bad_fd_device();
+    var fmt = vani_format_default();
+    assert_eq(vani_err_code(payload(vani_format_negotiate(d, fmt))),
+      VANI_ERR_HW_PARAMS, "HW_REFINE failure → VANI_ERR_HW_PARAMS");
+    assert_eq(vani_format_is_supported(d, fmt), 0,
+      "is_supported reports 0 when HW_REFINE fails");
+    return 0;
+}
+
+fn test_mixer_elem_info_failure_maps_to_mixer_elem() {
+    var m = alloc(16);
+    store64(m, 0 - 1);
+    store64(m + 8, 0);
+    var vres = vani_mixer_set_volume(m, "Master Playback Volume", 50);
+    assert_eq(is_ok(vres), 0, "ELEM_INFO failure is Err");
+    assert_eq(vani_err_code(payload(vres)), VANI_ERR_MIXER_ELEM, "→ MIXER_ELEM");
+    assert_streq(vani_err_detail(payload(vres)), "ELEM_INFO failed",
+      "detail names the failing ioctl");
+    var gres = vani_mixer_get_volume(m, "Master Playback Volume");
+    assert_streq(vani_err_detail(payload(gres)), "ELEM_INFO failed",
+      "get_volume detail");
+    var mres = vani_mixer_set_mute(m, "Master Playback Switch", 1);
+    assert_streq(vani_err_detail(payload(mres)), "ELEM_INFO failed",
+      "set_mute detail");
+    # get_mute gained the ELEM_INFO type gate its three siblings always
+    # had (1.2.0, finding M-1), so it now fails at ELEM_INFO like they
+    # do rather than reaching ELEM_READ with an unvalidated element.
+    var rres = vani_mixer_get_mute(m, "Master Playback Switch");
+    assert_streq(vani_err_detail(payload(rres)), "ELEM_INFO failed",
+      "get_mute type-gates before ELEM_READ");
+    var lres = vani_mixer_list_elements(m);
+    assert_eq(is_ok(lres), 0, "ELEM_LIST failure is Err");
+    assert_streq(vani_err_detail(payload(lres)), "ELEM_LIST count pass failed",
+      "list detail names the count pass");
+    return 0;
+}
+
+fn test_result_unwrap_passes_ok_through() {
+    # Only the Ok arm is testable in-process — the Err arm calls
+    # sys_exit(1) by design.
+    assert_eq(vani_result_unwrap(vani_ok(7)), 7, "unwrap of Ok returns the payload");
+    return 0;
+}
+
+fn test_audio_avail_reports_room_on_linux() {
+    # On Linux the blocking audio_write does the pacing, so avail
+    # deliberately reports "always room". agnos routes to sys_snd_avail.
+    var fake = alloc(32);
+    store64(fake, 0 - 1);
+    assert_eq(audio_avail(fake), AUDIO_FRAMES_MAX,
+      "Linux avail() reports the frame cap");
+    return 0;
+}
+
 fn main() {
     alloc_init();
     test_group("error");
@@ -890,6 +2248,97 @@ fn main() {
     test_swp_ioctl_size_encoding();
     test_resume_ioctl_encoding();
     test_pause_ioctl_encoding();
+
+    test_group("1.2.0 UAPI pins");
+    test_hwparam_mask_index_constants();
+    test_hwparam_interval_index_constants();
+    test_hwparam_group_extents();
+    test_hwparam_interval_slots_resolve();
+    test_pcm_ioctl_full_encoding();
+    test_ctl_ioctl_full_encoding();
+    test_pcm_ioctl_direction_bits();
+    test_ctl_elem_list_field_offsets();
+    test_access_constants();
+    test_alsa_format_literals();
+    test_pcm_state_literals();
+    test_interval_flag_bits();
+    test_pcm_status_layout();
+    test_mixer_elem_count_bound();
+    test_ring_new_rejects_bad_capacity();
+    test_alsa_phys_bytes_for_bits();
+    test_phys_width_agrees_with_format_layer();
+    test_format_for_bits_is_lossy();
+    test_format_for_bits_defaults_round_trip();
+    test_set_params_fmt_rejects_unknown_format();
+    test_ring_peek_does_not_consume();
+    test_ring_advance_consumes_exactly();
+    test_ring_advance_clamps();
+    test_ring_peek_wraps();
+    test_device_scratch_is_reused();
+    test_device_scratch_rejects_bad_size();
+    test_audio_null_handle_is_safe();
+    test_vani_null_handle_is_safe();
+
+    test_group("uapi hw_param indices");
+    test_hwparam_slot_offsets_are_uapi_correct();
+    test_group("uapi ioctl numbers");
+    test_ioctl_direction_bits();
+    test_ioctl_near_collisions_are_distinct();
+    test_group("uapi enum values");
+    test_ctl_iface_constants_full();
+    test_ctl_elem_type_constants_full();
+    test_format_and_access_mask_bit_positions();
+    test_group("device paths");
+    test_devpath_exact_strings();
+    test_ctl_path_exact_strings();
+    test_group("alsa guards");
+    test_audio_frame_bounds_reject();
+    test_audio_null_handle_guards();
+    test_audio_param_range_guards();
+    test_audio_write_bytes_rejects_unconfigured_handle();
+    test_audio_handle_accessors();
+    test_ctl_elem_id_get_name_roundtrip();
+    test_group("ring wrap + edges");
+    test_ring_wrap_preserves_byte_order();
+    test_ring_read_from_empty_and_short_reads();
+    test_ring_min_size_and_accessors();
+    test_ring_max_bytes_constant();
+    test_group("device handle + presets");
+    test_device_wrap_field_projection();
+    test_device_wrap_null_handle_is_device_open_err();
+    test_open_rejects_out_of_range_card();
+    test_round_period_grain();
+    test_latency_preset_period_math();
+    test_device_null_guards();
+    test_device_null_format_guards();
+    test_group("playback + capture guards");
+    test_play_and_record_guards();
+    test_play_from_ring_guards();
+    test_record_to_ring_guards();
+    test_group("mixer guards");
+    test_mixer_open_rejects_bad_card();
+    test_mixer_handle_accessors();
+    test_mixer_elem_guards();
+    test_mixer_list_layout_constants();
+    test_mixer_list_accessors();
+    test_group("error model");
+    test_err_code_values();
+    test_err_names_exhaustive();
+    test_err_recoverable_exhaustive();
+    test_err_result_helpers();
+    test_observability_toggle_defaults_silent();
+    test_result_unwrap_passes_ok_through();
+    test_group("format constants");
+    test_vani_rate_constants();
+    test_frame_math_against_literals();
+    test_group("ioctl failure paths (fd = -1)");
+    test_ioctl_failure_maps_to_hw_and_sw_params();
+    test_ioctl_failure_maps_to_prepare_start_resume();
+    test_state_query_failure_is_unknown();
+    test_write_failure_without_xrun_is_write_err();
+    test_negotiate_failure_maps_to_hw_params();
+    test_audio_avail_reports_room_on_linux();
+    test_mixer_elem_info_failure_maps_to_mixer_elem();
 
     assert_summary();
     return 0;

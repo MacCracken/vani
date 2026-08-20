@@ -111,6 +111,29 @@ jobs:
       - name: Vet
         run: cyrius vet programs/smoke.cyr
 
+      - name: API surface freeze
+        # v1.0.0 froze the full `vani_*` surface under SemVer, but until
+        # 1.2.0 nothing enforced it — the snapshot was compared by hand.
+        # `--scope=project` restricts the walk to vani's own src/ (the
+        # unscoped default counts every stdlib symbol in the include
+        # chain and reports ~975). Exit is non-zero on a *removed* or
+        # *arity-changed* symbol; purely additive growth is reported as
+        # non-breaking and passes, which is the correct SemVer rule for
+        # a minor. On an intentional addition, refresh the snapshot with
+        # `cyrius_api_surface --scope=project --update` and commit it.
+        #
+        # Gate verified at 1.2.0 rather than assumed: on a scratch copy,
+        # deleting `vani_ring_mask` exits 1 ("BREAKING: public fn removed
+        # or signature changed"), and changing `vani_ring_used`'s arity
+        # exits 1 as well. The unmodified tree exits 0.
+        #
+        # The core snapshot (docs/api-surface.core.snapshot, 24 symbols)
+        # is deliberately NOT gated here: it is derived from src/alsa.cyr
+        # alone and `--scope=project` walks the whole tree, so it reports
+        # 108 against a 24-symbol baseline. The distlib drift gate below
+        # already catches any change to the core bundle's contents.
+        run: cyrius_api_surface --scope=project
+
       - name: Verify dist bundles are in sync with src/
         # Both profiles regenerate cleanly. `core` is the playback-only
         # subset (src/alsa.cyr) introduced in 0.9.1 — see

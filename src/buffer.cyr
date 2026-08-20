@@ -39,13 +39,24 @@ fn _next_pow2(n): i64 {
     return p;
 }
 
+# Returns 0 on any failure — bad capacity, or allocation exhaustion.
+# Both `alloc` calls are checked: `alloc` signals failure by returning
+# 0, and writing through an unchecked 0 would store to address 0.
+# (Unchecked from v0.2.0 through 1.1.4; found by the 1.2.0 P(-1)
+# sweep, finding L-3. Reaching it needs total arena exhaustion, so
+# this is defense-in-depth, not a live bug.) The header alloc is
+# deliberately checked *before* the payload alloc so a failure of the
+# former does not strand the latter.
 fn vani_ring_new(capacity): i64 {
     if (capacity <= 0)                  { return 0; }
     if (capacity > VANI_RING_MAX_BYTES) { return 0; }
     var sz = _next_pow2(capacity);
     if (sz == 0) { return 0; }
     var rb = alloc(40);
-    store64(rb, alloc(sz));
+    if (rb == 0) { return 0; }
+    var buf = alloc(sz);
+    if (buf == 0) { return 0; }
+    store64(rb, buf);
     store64(rb + 8, sz);
     store64(rb + 16, sz - 1);
     store64(rb + 24, 0);
@@ -107,6 +118,40 @@ fn vani_ring_write(rb, src, n): i64 {
         i = i + 1;
     }
     store64(rb + 24, wpos + n);
+    return n;
+}
+
+# Copy up to n bytes to dst WITHOUT consuming them, and return the
+# count copied. Pairs with _vani_ring_advance to give callers a
+# write-then-consume ordering: peek, hand the bytes to the kernel,
+# then consume only what the kernel actually accepted. vani_ring_read
+# (peek + advance in one step) is wrong for that job, because a short
+# write or an XRUN after the read has already destroyed the remainder.
+# Added 1.2.0 for finding H-2. Private: not part of the frozen surface.
+fn _vani_ring_peek(rb, dst, n): i64 {
+    var avail = vani_ring_used(rb);
+    if (n > avail) { n = avail; }
+    if (n <= 0) { return 0; }
+    var buf = vani_ring_buf(rb);
+    var mask = vani_ring_mask(rb);
+    var rpos = vani_ring_rpos(rb);
+    var i = 0;
+    while (i < n) {
+        var src_off = (rpos + i) & mask;
+        store8(dst + i, load8(buf + src_off));
+        i = i + 1;
+    }
+    return n;
+}
+
+# Consume n bytes that a prior _vani_ring_peek copied out. Clamped to
+# what is actually present so a bogus n cannot push read_pos past
+# write_pos and invert the used/free invariant.
+fn _vani_ring_advance(rb, n): i64 {
+    var avail = vani_ring_used(rb);
+    if (n > avail) { n = avail; }
+    if (n <= 0) { return 0; }
+    store64(rb + 32, vani_ring_rpos(rb) + n);
     return n;
 }
 

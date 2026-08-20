@@ -1,5 +1,14 @@
 # Cyrius stdlib fold-in plan — target: cyrius 5.8.0
 
+> **STATUS: COMPLETED.** Kept as the historical record; do not plan
+> against it. Verified 2026-08-20 during the 1.2.0 P(-1) sweep:
+> `cyrius/lib/audio.cyr` no longer exists in the toolchain snapshot,
+> and cyrius bundles vani as `lib/vani.cyr`. Everything below describes
+> work that has already landed — the tense is original and has not been
+> rewritten. Nine other locations across the tree still described this
+> as future work at 1.1.5; those were corrected in the same sweep
+> (finding I-3).
+
 ## Goal
 
 Ship `vani` as the canonical audio library in the Cyrius standard

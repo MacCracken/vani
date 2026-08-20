@@ -11,9 +11,13 @@ goddess of knowledge, music, and art) — Audio device I/O for the
 Cyrius ecosystem. The voice of the system.
 
 - **Type**: Cyrius shared library — two distribution profiles:
-  full (`dist/vani.cyr`, 76 KB, 106 symbols) and core
-  (`dist/vani-core.cyr`, 29 KB, 22 `audio_*` symbols — playback
-  path only, single module from `src/alsa.cyr`)
+  full (`dist/vani.cyr`, the complete `vani_*` surface) and core
+  (`dist/vani-core.cyr`, `audio_*` playback path only, a single
+  module from `src/alsa.cyr`). Sizes and symbol counts are volatile
+  — they live in [`docs/development/state.md`](docs/development/state.md),
+  not here. (They were inlined as "76 KB / 106" and "29 KB / 22"
+  from 0.9.1 through 1.1.4 and had been wrong since 1.1.0 — exactly
+  the rot this file's core rule warns about. Removed at 1.2.0.)
 - **License**: GPL-3.0-only
 - **Language**: Cyrius (toolchain pinned in `cyrius.cyml [package].cyrius` — the source of truth; current pin tracked in [`docs/development/state.md`](docs/development/state.md))
 - **Version**: `VERSION` at the project root is the source of truth — do not inline the number here
@@ -71,12 +75,15 @@ Linux ALSA kernel module
 ```
 
 The raw `audio_*` ioctl primitives live in `src/alsa.cyr` (lifted
-from cyrius/lib/audio.cyr at v0.1.0; that stdlib path retires at
-cyrius 5.8.0). The `vani_*` higher-level API stacks on top in the
+from cyrius/lib/audio.cyr at v0.1.0; that stdlib path is now
+**retired** — see below). The `vani_*` higher-level API stacks on top in the
 same bundle. Consumers get both layers from a single
 `include "lib/vani.cyr"`.
 
-See [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib-fold-in.md) for the 5.8.0 plan.
+The fold-in is **complete**: `cyrius/lib/audio.cyr` no longer exists
+and cyrius bundles vani as `lib/vani.cyr`. See
+[`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib-fold-in.md)
+for the historical plan.
 
 ## Dependencies
 
@@ -98,7 +105,7 @@ See [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib
   stdlib at 0.9.9.
 
 `audio` is **no longer a stdlib dep** — vani owns that surface
-in-tree at `src/alsa.cyr`. `cyrius/lib/audio.cyr` retires at 5.8.0.
+in-tree at `src/alsa.cyr`. `cyrius/lib/audio.cyr` is retired and gone.
 
 Once `shravan` (codec library) exists, consumers will pair it with
 vani — but vani itself stays codec-free.
@@ -147,6 +154,7 @@ cyrius vet programs/smoke.cyr                          # link-time vet
 ./build/vani_latency_test                              # silent — both presets back-to-back
 ./build/vani_devices                                   # silent — yukti enumerator + open round-trip
 ./build/vani_tone                                      # AUDIBLE — 200 ms 440 Hz square wave
+./build/vani_vanitone                                  # AUDIBLE — AGNOS bring-up tone (also builds --agnos)
 ```
 
 ## Architecture (flat — matches mabda / yukti / vidya)
@@ -174,7 +182,8 @@ vani/
 │   ├── throughput.cyr        — 200 ms silence playback, frames/sec + xrun count
 │   ├── mixer_test.cyr        — read-only mixer enumeration
 │   ├── latency_test.cyr      — low-latency + casual presets back-to-back
-│   └── devices.cyr           — yukti enumerator + open round-trip
+│   ├── devices.cyr           — yukti enumerator + open round-trip
+│   └── vanitone.cyr          — AGNOS Gate-4 bring-up tone (0.9.7), QEMU-validated
 ├── bench-history.csv         — bench baseline (timestamp,commit,branch,name,ns)
 ├── docs/
 │   ├── adr/                  — architectural decision records
@@ -306,8 +315,18 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 1. **Full test suite** — all `.tcyr` pass, zero failures
 2. **Benchmark baseline** — `cyrius bench`, append to
    `bench-history.csv`; compare against prior closeout
-3. **Dead code audit** — review the linker's `dead:` lines after
-   smoke build; remove genuine dead code, document remaining floor
+3. **Dead code audit** — **do not use the smoke build's `dead:` lines
+   for this.** `programs/smoke.cyr` calls nothing but `sys_write`, so
+   every one of vani's own public symbols shows up dead and the step
+   produces no signal (established by the 1.2.0 sweep). Instead
+   cross-scan every `fn` definition in `src/` against every call site
+   in `src/` + `programs/` + `tests/`, and include `&fn` fnptr
+   references — a bare `name(` grep misses those and will report live
+   functions as dead. Then: remove genuinely unused `_` private
+   helpers; for unused **public** symbols, remember they are frozen by
+   [ADR 0002](docs/adr/0002-freeze-full-vani-surface-at-1.0.md) and
+   cannot be removed — the actionable output there is test coverage,
+   not deletion. Document the remaining floor.
 4. **Refactor pass** — consolidate the minor's additions where
    parallel codepaths / dispatch branches accreted
 5. **Code review pass** — walk diffs end-to-end for missed guards,
@@ -348,10 +367,14 @@ last patch of the current minor (e.g. `0.3.5` before `0.4.0`).
 - Enum values for constants — don't consume `gvar_toks` slots
   (4,096 initialized globals limit)
 - Heap-allocate large buffers — `var buf[256000]` bloats the
-  binary by 256KB. Vani's largest stack alloc is the 608-byte
-  `var hwp[608]` HW_PARAMS scratchpad in
-  `src/device.cyr::vani_format_negotiate` — under the 64KB
-  defense-in-depth threshold
+  binary by 256KB. Vani's largest stack alloc is the 1,224-byte
+  `var val[1224]` `snd_ctl_elem_value` scratchpad in `src/mixer.cyr`
+  (four sites), then the 608-byte `var hwp[608]` HW_PARAMS
+  scratchpad in `src/alsa.cyr` / `src/device.cyr`. Both are far
+  under the 64KB defense-in-depth threshold CI scans for. (This
+  entry named `hwp[608]` as the largest from v0.2.0 through 1.1.4,
+  which stopped being true at 0.3.0 when the mixer landed;
+  corrected by the 1.2.0 documentation audit.)
 - `break` in while loops with `var` declarations is unreliable —
   use flag + `continue`
 - No negative literals — write `(0 - N)` not `-N`
@@ -388,7 +411,7 @@ x86_64 binary.
 - [`docs/audit/`](docs/audit/) — security audit reports (`YYYY-MM-DD-audit.md`).
 - [`docs/development/roadmap.md`](docs/development/roadmap.md) — completed, backlog, future, v1.0 criteria.
 - [`docs/development/state.md`](docs/development/state.md) — **live state snapshot, refreshed every release**.
-- [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib-fold-in.md) — cyrius 5.8.0 fold-in plan.
+- [`docs/development/cyrius-stdlib-fold-in.md`](docs/development/cyrius-stdlib-fold-in.md) — the stdlib fold-in plan. **Completed**; kept as the historical record.
 - [`CHANGELOG.md`](CHANGELOG.md) — source of truth for all changes.
 
 New quirks and constraints land in `docs/architecture/` as numbered

@@ -24,7 +24,7 @@ Vani is the **single audio authority in stdlib** — same model as
 mabda for GPU. The raw ALSA ioctl primitives (`audio_*`) live in
 `src/alsa.cyr` rather than a separate stdlib `audio.cyr`. This was
 absorbed at v0.1.0 (lifted from the prior `cyrius/lib/audio.cyr`);
-that legacy path retires at cyrius 5.8.0. After 5.8.0, downstream
+that legacy path is now retired and gone. Downstream
 code that wants ALSA does `include "lib/vani.cyr"` and gets the
 entire stack from one bundle.
 

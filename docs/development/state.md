@@ -10,34 +10,35 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `1.1.4` (stable — `vani_*` frozen under SemVer; 1.1.4 is a **patch**: cyrius pin `6.5.5`→`6.5.31` + the stdlib that came with it, **zero semantic source change** (formatter whitespace reflow + one comment cross-reference), no API change) |
+| Current version | `1.2.0` (stable — **minor**: full P(-1) sweep. Seven correctness/memory-safety repairs, one **additive** public fn (`audio_set_params_fmt`), 259 → 775 assertions. cyrius pin `6.5.31`→`6.5.32` (provably inert). No breaking change — the 1.0.0 SemVer freeze holds) |
 | Released | 2026-08-20 |
-| Cyrius toolchain pin | `6.5.31` |
+| Cyrius toolchain pin | `6.5.32` |
 | Dependency model | **all-stdlib** — no git overrides, no `cyrius.lock`. `yukti` + `patra` (and patra's transitive `atomic` / `sync` / `thread_local`) are stdlib modules as of the 0.9.9 all-stdlib cut. **The pin is the supply chain**: `cyrius build` resolves `include "lib/…"` from `$CYRIUS_HOME/versions/<pin>/lib`, *not* from the vendored `./lib/` — established by the 1.1.2 audit (canary in `lib/alloc.cyr`) and re-confirmed at 1.1.4 by a deliberate syntax error in `./lib/tagged.cyr` that the build sailed past, byte-identical. `./lib/` is editor/IDE support and the source of the `shadows version-pinned` warning only |
-| Distribution profiles | full (`dist/vani.cyr`, 83,005 B / 2253 lines / 108 symbols) and core (`dist/vani-core.cyr`, 34,801 B / 941 lines / 24 symbols) |
-| API surface baseline | `docs/api-surface.snapshot` (108 public fns) — `cyrius_api_surface --scope=project` reports "surface matches snapshot exactly" at 1.1.4; `docs/api-surface.core.snapshot` (24) |
-| Latest audit | [`docs/audit/2026-08-20-v1.1.4-audit.md`](../audit/2026-08-20-v1.1.4-audit.md) — toolchain/dep sweep across 26 cyrius releases, UAPI re-pin vs kernel 7.1.8, CVE sweep, CI-gate audit. Prior: [`2026-07-19-v1.1.2-audit.md`](../audit/2026-07-19-v1.1.2-audit.md) (1.1.3 shipped without one — gap closed here) |
+| Distribution profiles | full (`dist/vani.cyr`, 99,989 B / 2615 lines / **109** symbols) and core (`dist/vani-core.cyr`, 41,917 B / 1091 lines / **25** symbols) |
+| API surface baseline | `docs/api-surface.snapshot` (**109** public fns) — `cyrius_api_surface --scope=project` reports "surface matches snapshot exactly"; `docs/api-surface.core.snapshot` (**25**). Grew by exactly one additive fn at 1.2.0 (`audio_set_params_fmt`), which is why 1.2.0 is a minor. **Now gated in CI** — the gate was verified to exit 1 on both a removal and an arity change |
+| Latest audit | [`docs/audit/2026-08-20-v1.2.0-audit.md`](../audit/2026-08-20-v1.2.0-audit.md) — **full P(-1) sweep**: 5 review lenses + adversarial verification of every non-INFO finding (50 of 55 re-rated). Prior: [`2026-08-20-v1.1.4-audit.md`](../audit/2026-08-20-v1.1.4-audit.md) |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0); agnos target builds clean (not a CI leg) |
 
 ## Test / Bench Counts
 
 | Metric | Value |
 |--------|-------|
-| CPU test assertions | 259 (groups: error, format, buffer, device, yukti, audit-2026-04-30, hw_params, hw_refine, mixer, v0.4.0 state + sw_params) |
+| CPU test assertions | **775** (was 259 at 1.1.4). Reference coverage **97%** — 106/109 fns, 8/8 files, up from 36/108 and 5/8. Every 1.2.0 repair ships a regression assertion, and the load-bearing ones were validated with negative controls (see CHANGELOG) |
 | CPU benchmarks | 13 (format / ring / hwp / negotiate paths) |
-| Real-HW programs | 8 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`) |
-| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row `ddb488b` (2026-08-20, v1.1.4) against the prior `31d5f08` (2026-07-19, v1.1.2). At 1.1.4, three runs under the pinned 6.5.31 toolchain read `ring_200ms_playback` 83.9 / 85.9 / 85.6 µs against the 84.1 µs 1.1.2 row — inside run-to-run noise, and measured on a machine under heavy concurrent load. `hwp_init_any` improved 991 → 934-956 ns, `ring_read_64b` 328 → 316-327 ns. Nothing in this bump touches a benched code path. |
+| Real-HW programs | 8 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`) plus `vanitone` (agnos bring-up) — 9 build targets, all clean |
+| Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row 2026-08-20 (v1.2.0) against the 1.1.4 row. `ring_200ms_playback` read 82.9-90.1 µs across eight runs vs the 83.8 µs 1.1.4 row — **machine noise, not variance in vani**: the only functions inside the timed batch (`vani_ring_reset`, `vani_ring_write`) are byte-identical to 1.1.4. Median run recorded. |
 
 ## Build Artifacts
 
 | Artifact | Size | Notes |
 |----------|------|-------|
-| `dist/vani.cyr` (full profile) | 83,005 B / 2253 lines (v1.1.4) | Full consumer-facing bundle: 108 public symbols across alsa/error/format/buffer/device/playback/capture/mixer. `+206 B` vs 1.1.3 — the version stamp, the formatter's continuation-indent reflow, and the 2-line comment cross-reference that closed the lint deferral. `git diff -w` against 1.1.3 is **8 comment lines and the version stamp, nothing else**, which is the proof that 1.1.4 carries no semantic source change. |
-| `dist/vani-core.cyr` (core profile) | 34,801 B / 941 lines (v1.1.4) | Playback-only single-module bundle: 24 `audio_*` symbols from `src/alsa.cyr` only. `+148 B` vs 1.1.3, same whitespace-plus-comment-plus-stamp story. ~58% smaller than full. |
-| `build/vani_smoke` (DCE) | **506,816 B** binary; 351,545 B NOPed / 1307 unreachable fns (v1.1.4, cyrius 6.5.31) | x86_64 ELF link-check binary. A 2×2 A/B over `(cycc version) × (pinned stdlib snapshot)` separates the growth exactly: **+30,008 B from the stdlib snapshot** (identical delta under either compiler) and **+4,096 B from cycc** (identical delta under either stdlib). Nominal 1.1.3 (cycc 6.5.5 + stdlib 6.5.5) was 472,712 B, so the full nominal delta is +34,104 B. The cycc axis is +4,064 B of real text/rodata (R+E LOAD `0x64d00`→`0x65ce0`) rounded to one 4 KiB page; the RW segment is byte-identical. Reachable-fn count unchanged — codegen density, not new code. |
-| `build/vani_smoke-aarch64` | **744,232 B** binary; 579,420 B NOPed / 1307 unreachable fns (v1.1.4) | aarch64 ELF link-check binary (since 0.9.0) — valid stripped ARM aarch64 ELF. Was 677,336 B at the 6.5.5 pin. |
-| `build/vani_smoke-agnos` | **489,624 B**; 333,407 B NOPed / 1315 unreachable fns (v1.1.4) | agnos target (`--agnos`, not a CI leg). Was 451,584 B at the 6.5.5 pin. **Zero warnings** — and zero at *both* ends of this bump, so the 15 stdlib-`lib/yukti.cyr` warnings the 1.1.2 audit documented were already resolved upstream before 6.5.5; 1.1.4 did not fix them and does not claim to. |
-| `dist/vani.deps` / `dist/vani-core.deps` | **21 / 4** stdlib leaves | cyrius distlib sidecars (auto-generated, consumed by consumers' `cyrius deps`); committed alongside the bundles. Grew at 1.1.4 from 15 / 3: the full profile gained `freelist`, `process`, `patra`, `atomic`, `sync`, `thread_local` (the yukti/patra transitive chain, previously under-reported); core gained `syscalls`, which `src/alsa.cyr` plainly needs for `syscall(SYS_IOCTL, …)` and `sys_open` and which 1.1.1's 15→3 tightening had over-trimmed. More correct, not churn. |
+| `dist/vani.cyr` (full profile) | 99,989 B / 2615 lines (v1.2.0) | Full consumer-facing bundle: **109** public symbols. Grew from 1.1.4's 83,005 B — the 1.2.0 repairs plus the explanatory comment blocks each one carries. |
+| `dist/vani-core.cyr` (core profile) | 41,917 B / 1091 lines (v1.2.0) | Playback-only single-module bundle from `src/alsa.cyr`: **25** `audio_*` symbols (gained `audio_set_params_fmt`). |
+| `build/vani_smoke` (DCE) | **511,192 B** (v1.2.0, cyrius 6.5.32) | x86_64 ELF link-check binary. Was 506,816 B at 1.1.4 — **+4,376 B**, entirely vani's own hardening (the pin bump is provably inert: byte-identical stdlib, byte-identical binary). |
+| `build/vani_smoke-aarch64` | **744,512 B** (v1.2.0) | aarch64 ELF link-check binary — valid stripped ARM aarch64 ELF. Was 744,232 B. |
+| `build/vani_smoke-agnos` | **494,000 B** (v1.2.0) | agnos target (`--agnos`, not a CI leg), zero warnings. Was 489,624 B. |
+| `dist/vani.deps` / `dist/vani-core.deps` | 21 / 4 stdlib leaves | Unchanged at 1.2.0 — the release adds no stdlib dependency. |
+| All 9 programs | 485-516 KB | `smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`, `vanitone` — all build with zero warnings. |
 
 ## Toolchain / CI Notes
 
@@ -47,7 +48,8 @@
 | CI lint gate | Extended at 1.1.4 to fail on `N untracked deferrals` as well as `warn ` lines. cyrlint exits 0 on deferrals, so the gate has to catch them. vani's one hit (`src/alsa.cyr`, a stale "filed as audit follow-up" sentence for work closed at 0.3.0) is closed; the file now cross-references `docs/audit/2026-04-30-audit.md`. |
 | cyrlint surface | **Byte-identical between 6.5.5 and 6.5.31** on vani's sources (2 `sys_open` notes, 1 deferral, 0 warnings under both) — this bump adds no new lint surface. The deferral class predates 6.5.5; closing it at 1.1.4 is cleanup, not toolchain-forced. |
 | api-surface check | `cyrius_api_surface --scope=project` → 108, matches snapshot exactly. **Still not wired into CI** — the v1.0.0 SemVer freeze is enforced by hand. Filed P2. |
-| Open P1 | **`enum AlsaHwParam` interval indices are +2 off the kernel UAPI** (`src/alsa.cyr:156-169`). No wire impact — all 12 use sites compute `PARAM - FIRST_INTERVAL` and `rmask` is all-ones — but it violates "kernel UAPI is the spec". Found by the 1.1.4 sweep; deferred out of 1.1.4 to preserve the patch's inertness proof. See roadmap P1. |
+| Open P1 | *None.* The 1.1.4 P1 (`enum AlsaHwParam` +2 off the UAPI) was **fixed at 1.2.0** along with the regression assertions that would have caught it. |
+| api-surface CI gate | **Closed at 1.2.0** — `cyrius_api_surface --scope=project` now runs in CI, verified to exit 1 on a removal and on an arity change. |
 
 ## Real-HW Verification
 
@@ -72,7 +74,7 @@
 |------|--------|-------|
 | Audible real-HW round-trip at 1.1.4 | opportunistic | `vani_devices` re-confirmed enumeration under yukti 2.3.8, but every PCM open on this box currently returns EACCES (logind ACL grants `sddm`, not this shell), so no tone was pushed at 1.1.4. The last audible confirmation is cyrius-doom 0.30.5 (2026-06-29). Re-run `./build/vani_tone` from inside a desktop audio session when convenient. |
 | USB + HDMI real-HW round-trip | post-1.0 (HW-gated) | The v1.0 freeze criterion #1 residual. Same frozen code path as onboard HDA; verification needs USB-class / HDMI hardware access. Does **not** touch the frozen API. |
-| `snd_pcm_status` comment vs pinned table | 1.2.0 | `audio_get_state` declares `var status[192]` under a comment claiming 192 bytes; the pinned table and the kernel probe both say 152. Over-allocated, therefore safe — but a wrong comment on a UAPI-pinned buffer. Filed by the 1.1.2 audit (INFO #3). |
+| ~~`snd_pcm_status` comment vs pinned table~~ | **done 1.2.0** | Buffer narrowed 192 → 152, `AlsaPcmStatusLayout` enum added, `load64` → `load32` on the u32 `state` field, and an assertion ties the ioctl's size bits to the constant. |
 | XRUN-rate stress benchmark | optional post-1.0 | Reproducing CPU contention reliably needs harness setup beyond a release gate. |
 | Portable `_clock_monotonic()` for throughput / latency_test | optional post-1.0 | `programs/throughput.cyr` / `latency_test.cyr` still use raw `syscall(228)` (x86_64-only by design); fixes when an aarch64 dev host with audio HW exists. |
 
@@ -99,6 +101,7 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `1.2.0` | 2026-08-20 | **Minor — full P(-1) sweep.** Seven repairs, all regression-tested with negative controls: the negotiated sample format never reached the kernel (U8→S8, S16_BE→S16_LE, FLOAT_LE→S32_LE); `audio_write_bytes` mis-sized S24_LE frames (stride 3 vs 4) so the kernel over-read past the caller's buffer; ring transfers leaked a scratch buffer per call (~110 MB / 60k iters, reproduced twice); `vani_play_from_ring` consumed the ring before writing so short writes destroyed audio; unbounded kernel counts in the mixer setters looped into a 1224-byte stack buffer; `vani_record_to_ring` trusted the kernel's frame count; 21 entry points faulted on a null handle (SIGSEGV reproduced). One **additive** public fn (`audio_set_params_fmt`) — hence a minor. 259 → **775** assertions, coverage 33% → **97%**. `_puti` deduplicated out of six programs onto stdlib `fmt_int`. cyrius pin `6.5.31`→`6.5.32`, provably inert. Method: 5 review lenses + adversarial re-verification that re-rated 50 of 55 findings. |
 | `1.1.4` | 2026-08-20 | **Patch — toolchain + stdlib refresh across 26 cyrius releases, zero semantic source change.** cyrius pin `6.5.5` → `6.5.31`; yukti `2.3.2` → `2.3.8`, patra `1.12.12` → `1.13.9`, sakshi `2.4.7` → `2.4.11`. 40 resolved modules (24 changed), all byte-identical to the pinned snapshot. A clean 2×2 A/B splits the binary growth exactly: +30,008 B stdlib, +4,096 B cycc, perfectly orthogonal. Both dist bundles `git diff -w` clean apart from the version stamp; API surface holds at 108. 259/259, 0 lint warnings, 0 untracked deferrals, vet clean, x86_64 / aarch64 / agnos all build clean with zero warnings. Fixed the **CI format gate**, which the toolchain bump had silently inverted (`cyrius fmt <file>` now formats in place and prints nothing — the old `diff <(…)` form was a guaranteed red that also rewrote sources); applied the resulting formatter reflow (whitespace only, 59/59 across 6 files); closed the last untracked lint deferral. Also documented that `cyrius build` resolves stdlib from the **pinned snapshot**, not vendored `./lib/`. UAPI re-pinned and CVE-swept — closes the audit gap 1.1.3 left. |
 | `1.1.3` | 2026-08-02 | **Patch — toolchain catch-up.** cyrius pin `6.4.67` → `6.5.5`, cut together with the wider desktop stack so one compiler builds the whole burn. Notable window content: **6.5.1** made overload-suffix arity a hard error (was a warning); **6.4.75** fixed `fn_table` growth past 8192 corrupting six fn-indexed side tables; **6.5.0** added file-scoped `private` / per-item `public`; **6.4.82** completed the agnos GPU syscall wrapper band `#82`-`#95`. Host + `--agnos` builds green, suite passes, distlib regenerated. Shipped **without** an audit doc — gap closed at 1.1.4. |
 | `1.1.2` | 2026-07-19 | **Patch — toolchain + stdlib dep refresh, zero source change.** cyrius pin `6.4.49` → `6.4.67`; yukti `2.2.9` → `2.2.10` (version stamp only), patra `1.12.9` → `1.12.12`. A 2×2 `(cycc) × (stdlib)` A/B proved **cycc version had zero effect on vani's emitted bytes** in that window. One behavior delta: `ALLOC_MAX` 256 MiB → 2 GiB, reaching `vani_ring_new` only in (256 MiB, 1 GiB] — a window nothing enters, failing safe. 259/259, 0 warnings. UAPI re-pinned (18 ioctls + 8 struct sizes, 0 mismatches vs kernel 7.1), 8 in-window kernel audio CVEs triaged clean. |
@@ -116,7 +119,7 @@
 Vani depends on:
 
 ```
-cyrius (6.5.31)
+cyrius (6.5.32)
   └─ stdlib — syscalls / string / alloc / str / fmt / vec / io / fs /
              args / hashmap / tagged / fnptr / freelist / process /
              chrono / sakshi / yukti (2.3.8) / patra (1.13.9) /

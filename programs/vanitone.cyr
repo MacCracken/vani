@@ -72,10 +72,29 @@ fn main(): i64 {
 
     # audio_write is kernel-paced/blocking but may short-write — loop
     # until every frame is accepted (the WRITEI contract on both targets).
+    # CLAUDE.md hard rule: `break` is unreliable in a while loop that
+    # declares `var` — use a flag + `continue`. This loop declared
+    # `var got` and broke out of it from v0.9.7 until 1.2.0: the one
+    # place in vani's first-party source that violated the rule, and
+    # cyrlint cannot see it, so CI never enforced it. No miscompilation
+    # was ever observed — this is convention hygiene, not a fixed bug
+    # (1.2.0 sweep, finding I-2).
+    # The loop condition itself carries the exit flag, so `continue`
+    # actually terminates. (A first pass at this kept `while (w < frames)`
+    # and continued on the flag, which spins forever once the flag is
+    # set — the exact trap the flag+continue idiom invites.)
     var w = 0;
-    while (w < frames) {
+    var done = 0;
+    while (done == 0) {
+        if (w >= frames) {
+            done = 1;
+            continue;
+        }
         var got = audio_write(dev, buf + w * VT_BPF, frames - w);
-        if (got <= 0) { break; }
+        if (got <= 0) {
+            done = 1;
+            continue;
+        }
         w = w + got;
     }
     if (w < frames) { _puts("write: SHORT\n"); audio_close(dev); return 1; }

@@ -34,28 +34,6 @@ enum ProbeTarget {
 
 fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 
-fn _puti(n) {
-    var buf[24];
-    var i = 23;
-    store8(&buf + i, 0);
-    if (n == 0) {
-        i = i - 1;
-        store8(&buf + i, 48);
-        sys_write(1, &buf + i, 23 - i);
-        return 0;
-    }
-    var neg = 0;
-    if (n < 0) { neg = 1; n = 0 - n; }
-    while (n > 0) {
-        i = i - 1;
-        store8(&buf + i, 48 + (n % 10));
-        n = n / 10;
-    }
-    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
-    sys_write(1, &buf + i, 23 - i);
-    return 0;
-}
-
 fn _state_name(s) {
     if (s == SND_PCM_STATE_OPEN)      { return "OPEN"; }
     if (s == SND_PCM_STATE_SETUP)     { return "SETUP"; }
@@ -71,9 +49,9 @@ fn _state_name(s) {
 fn main() {
     alloc_init();
     _puts("vani probe — card ");
-    _puti(PROBE_CARD);
+    fmt_int(PROBE_CARD);
     _puts(" device ");
-    _puti(PROBE_DEVICE);
+    fmt_int(PROBE_DEVICE);
     _puts(" playback\n");
 
     # 1. Open
@@ -86,13 +64,13 @@ fn main() {
     }
     var d = payload(res);
     _puts("  open: OK fd=");
-    _puti(audio_fd(vani_audio_handle(d)));
+    fmt_int(audio_fd(vani_audio_handle(d)));
     _puts("\n");
 
     # 2. Initial state — fresh-open should be OPEN (0).
     var st0 = vani_state(d);
     _puts("  state-after-open: ");
-    _puti(st0);
+    fmt_int(st0);
     _puts(" (");
     _puts(_state_name(st0));
     _puts(")\n");
@@ -112,20 +90,20 @@ fn main() {
         return 1;
     }
     _puts("  configure: rate=");
-    _puti(vani_format_rate(fmt));
+    fmt_int(vani_format_rate(fmt));
     _puts(" ch=");
-    _puti(vani_format_channels(fmt));
+    fmt_int(vani_format_channels(fmt));
     _puts(" bits=");
-    _puti(vani_format_bit_depth(fmt));
+    fmt_int(vani_format_bit_depth(fmt));
     _puts(" bpf=");
-    _puti(vani_bytes_per_frame(fmt));
+    fmt_int(vani_bytes_per_frame(fmt));
     _puts("\n");
 
     # 4. Verify state transitioned to SETUP. Real HW_PARAMS
     # ioctl runs inside vani_configure (v0.2.0+).
     var st1 = vani_state(d);
     _puts("  state-after-configure: ");
-    _puti(st1);
+    fmt_int(st1);
     _puts(" (");
     _puts(_state_name(st1));
     _puts(")\n");
@@ -146,7 +124,7 @@ fn main() {
     }
     var st2 = vani_state(d);
     _puts("  state-after-prepare: ");
-    _puti(st2);
+    fmt_int(st2);
     _puts(" (");
     _puts(_state_name(st2));
     _puts(")\n");

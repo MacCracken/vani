@@ -29,3 +29,5 @@ new contributor reading the diff, write an ADR.
 | # | Title | Status |
 |---|-------|--------|
 | [0001](0001-yukti-git-override.md) | Yukti dep pinned via git override ahead of cyrius re-bundle | Accepted |
+| [0002](0002-freeze-full-vani-surface-at-1.0.md) | Freeze the full `vani_*` surface at 1.0.0 | Accepted |
+| [0003](0003-no-windows-pe-target.md) | Windows/PE is not a supported vani target | Accepted |

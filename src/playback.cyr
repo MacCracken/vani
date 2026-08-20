@@ -65,9 +65,29 @@ fn vani_play_from_ring(d, rb): i64 {
     var avail_bytes = vani_ring_used(rb);
     var avail_frames = avail_bytes / bpf;
     if (avail_frames == 0) { return vani_ok(0); }
-    # Drain into a contiguous scratch buffer — audio_write needs one.
+    # Copy into a contiguous scratch buffer — audio_write needs one.
+    #
+    # PEEK, write, then consume exactly what the device accepted. Until
+    # 1.2.0 this did vani_ring_read (which consumes) BEFORE the write,
+    # so a short write or an XRUN silently destroyed the un-written
+    # remainder — the ring had already dropped it and no caller could
+    # get it back. vani's own programs/vanitone.cyr documents the
+    # short-write contract that this function was violating. Finding H-2.
+    #
+    # The scratch buffer is cached on the device rather than alloc'd per
+    # call; the old code leaked one buffer per period out of a
+    # never-freeing bump allocator. Finding H-3.
     var n_bytes = avail_frames * bpf;
-    var scratch = alloc(n_bytes);
-    vani_ring_read(rb, scratch, n_bytes);
-    return vani_play(d, scratch, avail_frames);
+    var scratch = _vani_device_scratch(d, n_bytes);
+    if (scratch == 0) { return vani_err_result(VANI_ERR_WRITE); }
+    _vani_ring_peek(rb, scratch, n_bytes);
+    var res = vani_play(d, scratch, avail_frames);
+    # On error nothing is consumed — the caller keeps its audio and can
+    # retry after recovering the device.
+    if (is_ok(res) == 0) { return res; }
+    var written = payload(res);
+    if (written < 0) { written = 0; }
+    if (written > avail_frames) { written = avail_frames; }
+    _vani_ring_advance(rb, written * bpf);
+    return vani_ok(written);
 }

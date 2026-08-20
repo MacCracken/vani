@@ -7,13 +7,21 @@
 # tracking, an XRUN counter, and a yukti-descriptor adapter so
 # discovery (yukti's job) feeds straight into open (vani's job).
 #
-# VaniDevice struct layout (48 bytes):
+# VaniDevice struct layout (64 bytes):
 #   +0:  audio_h   — pointer to stdlib audio handle (32 bytes from audio.cyr)
 #   +8:  card      — ALSA card number
 #   +16: device    — ALSA device number
 #   +24: format    — VaniFormat ptr (or 0 until configured)
 #   +32: direction — 0 playback, 1 capture
 #   +40: xrun_count — observed underruns/overruns since open
+#   +48: scratch   — cached transfer buffer (0 until first ring transfer)
+#   +56: scratch_cap — bytes the cached buffer can hold
+#
+# Grew 48 -> 64 at 1.2.0. The ring transfer paths used to `alloc()` a
+# fresh scratch buffer on EVERY call, out of a bump allocator that
+# never frees — steady-state playback leaked its period buffer once per
+# period, measured at ~110 MB RSS per 10 minutes (finding H-3). The
+# buffer now lives on the device and is reused.
 
 enum VaniDirection {
     VANI_PLAYBACK = 0;
@@ -68,14 +76,34 @@ fn _vani_device_wrap(audio_h, card, device, direction): i64 {
     if (audio_h == 0) {
         return vani_err_result(VANI_ERR_DEVICE_OPEN);
     }
-    var d = alloc(48);
+    var d = alloc(64);
+    if (d == 0) {
+        return vani_err_result(VANI_ERR_DEVICE_OPEN);
+    }
     store64(d, audio_h);
     store64(d + 8, card);
     store64(d + 16, device);
     store64(d + 24, 0);
     store64(d + 32, direction);
     store64(d + 40, 0);
+    store64(d + 48, 0);
+    store64(d + 56, 0);
     return vani_ok(d);
+}
+
+# Cached transfer scratch buffer, grown on demand. Returns 0 if the
+# allocation fails, so callers must check. Steady-state playback asks
+# for the same size every call and allocates exactly once; a caller
+# that varies the size pays only when it grows. Private helper.
+fn _vani_device_scratch(d, need_bytes): i64 {
+    if (need_bytes <= 0) { return 0; }
+    var cap = load64(d + 56);
+    if (cap >= need_bytes) { return load64(d + 48); }
+    var buf = alloc(need_bytes);
+    if (buf == 0) { return 0; }
+    store64(d + 48, buf);
+    store64(d + 56, need_bytes);
+    return buf;
 }
 
 fn vani_open_playback(card, device): i64 {
@@ -101,7 +129,10 @@ fn vani_close(d): i64 {
 # Accessors
 # ================================================================
 
-fn vani_audio_handle(d): i64 { return load64(d); }
+fn vani_audio_handle(d): i64 {
+    if (d == 0) { return 0; }
+    return load64(d);
+}
 fn vani_card(d): i64 { return load64(d + 8); }
 fn vani_device_id(d): i64 { return load64(d + 16); }
 fn vani_format_get(d): i64 { return load64(d + 24); }
@@ -124,10 +155,15 @@ fn vani_configure(d, fmt): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
-    var r = audio_set_params(h,
+    # Pass the VaniFormat's actual AlsaFormat, not its bit depth. Until
+    # 1.2.0 this passed vani_format_bit_depth(fmt), and the raw layer
+    # rebuilt a format from the width alone — so U8 was programmed as
+    # S8, S16_BE as S16_LE and FLOAT_LE as S32_LE. See finding H-4.
+    var r = audio_set_params_fmt(h,
       vani_format_rate(fmt),
       vani_format_channels(fmt),
-      vani_format_bit_depth(fmt));
+      vani_format_alsa(fmt),
+      0, 0);
     if (r < 0) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
     }
@@ -143,10 +179,10 @@ fn vani_configure_buffered(d, fmt, period_frames, buffer_frames): i64 {
     if (d == 0)   { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (fmt == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
     var h = vani_audio_handle(d);
-    var r = audio_set_params_full(h,
+    var r = audio_set_params_fmt(h,
       vani_format_rate(fmt),
       vani_format_channels(fmt),
-      vani_format_bit_depth(fmt),
+      vani_format_alsa(fmt),
       period_frames, buffer_frames);
     if (r < 0) {
         return vani_err_result(VANI_ERR_HW_PARAMS);
@@ -233,26 +269,31 @@ fn vani_resume(d): i64 {
 }
 
 fn vani_prepare(d): i64 {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     var r = audio_prepare(vani_audio_handle(d));
     if (r < 0) { return vani_err_result(VANI_ERR_PREPARE); }
     return vani_ok(d);
 }
 
 fn vani_start(d): i64 {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     var r = audio_start(vani_audio_handle(d));
     if (r < 0) { return vani_err_result(VANI_ERR_START); }
     return vani_ok(d);
 }
 
 fn vani_drain(d): i64 {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     return audio_drain(vani_audio_handle(d));
 }
 
 fn vani_drop(d): i64 {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     return audio_drop(vani_audio_handle(d));
 }
 
 fn vani_state(d): i64 {
+    if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     return audio_get_state(vani_audio_handle(d));
 }
 

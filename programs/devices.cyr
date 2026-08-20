@@ -23,28 +23,6 @@ include "src/lib.cyr"
 fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 fn _puterr(s) { sys_write(2, s, strlen(s)); return 0; }
 
-fn _puti(n) {
-    var buf[24];
-    var i = 23;
-    store8(&buf + i, 0);
-    if (n == 0) {
-        i = i - 1;
-        store8(&buf + i, 48);
-        sys_write(1, &buf + i, 23 - i);
-        return 0;
-    }
-    var neg = 0;
-    if (n < 0) { neg = 1; n = 0 - n; }
-    while (n > 0) {
-        i = i - 1;
-        store8(&buf + i, 48 + (n % 10));
-        n = n / 10;
-    }
-    if (neg == 1) { i = i - 1; store8(&buf + i, 45); }
-    sys_write(1, &buf + i, 23 - i);
-    return 0;
-}
-
 fn _put_str(s) {
     if (s == 0) { _puts("(null)"); return 0; }
     sys_write(1, str_data(s), str_len(s));
@@ -71,13 +49,13 @@ fn _state_name(s) {
 
 fn _print_entry(idx, desc) {
     _puts("  [");
-    _puti(idx);
+    fmt_int(idx);
     _puts("] card=");
-    _puti(yukti_audio_card(desc));
+    fmt_int(yukti_audio_card(desc));
     _puts(" device=");
-    _puti(yukti_audio_device(desc));
+    fmt_int(yukti_audio_device(desc));
     _puts(" sub=");
-    _puti(yukti_audio_subdevice(desc));
+    fmt_int(yukti_audio_subdevice(desc));
     _puts(" dir=");
     _puts(_direction_label(yukti_audio_direction(desc)));
     _puts(" driver=");
@@ -115,12 +93,12 @@ fn _probe_via_yukti(desc) {
     }
     var d = payload(res);
     _puts("  open: OK fd=");
-    _puti(audio_fd(vani_audio_handle(d)));
+    fmt_int(audio_fd(vani_audio_handle(d)));
     _puts("\n");
 
     var st0 = vani_state(d);
     _puts("  state-after-open: ");
-    _puti(st0);
+    fmt_int(st0);
     _puts(" (");
     _puts(_state_name(st0));
     _puts(")\n");
@@ -138,11 +116,11 @@ fn _probe_via_yukti(desc) {
         return 1;
     }
     _puts("  configure: rate=");
-    _puti(vani_format_rate(fmt));
+    fmt_int(vani_format_rate(fmt));
     _puts(" ch=");
-    _puti(vani_format_channels(fmt));
+    fmt_int(vani_format_channels(fmt));
     _puts(" bits=");
-    _puti(vani_format_bit_depth(fmt));
+    fmt_int(vani_format_bit_depth(fmt));
     _puts("\n");
 
     var st1 = vani_state(d);
@@ -190,7 +168,7 @@ fn main() {
     }
     var n = vec_len(devs);
     _puts("found ");
-    _puti(n);
+    fmt_int(n);
     _puts(" PCM endpoint(s)\n");
     if (n == 0) {
         _puts("(no audio devices on this host — bailing without an open round-trip)\n");

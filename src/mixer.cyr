@@ -158,6 +158,28 @@ fn vani_mixer_set_volume(m, elem_name, percent): i64 {
     if (count == 0) {
         return vani_err_result(VANI_ERR_MIXER_ELEM);
     }
+    # `count` is kernel-supplied and drives the store loop below into a
+    # fixed 1224-byte stack buffer. Unbounded through 1.1.4: writes start
+    # at +72 in 8-byte steps, so any count above 144 ran off the end of
+    # the stack allocation.
+    #
+    # We bound it here rather than relying on the kernel to have done so.
+    # That is the CLAUDE.md rule ("do not trust external data ... without
+    # validation") and it does not depend on any claim about kernel
+    # internals: `integer.value[]` is 128 longs wide in the UAPI, so any
+    # count above 128 is already outside the struct vani is filling,
+    # whatever the kernel would or would not have accepted. Reachability
+    # of an actual overflow on a correct kernel is disputed — the 1.2.0
+    # sweep's verifiers split LOW/MEDIUM on it — but the guard is one
+    # comparison and the alternative is trusting a u32 from a driver.
+    if (count < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_INFO negative count");
+    }
+    if (count > CTL_ELEM_VALUE_MAX_COUNT) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_INFO count exceeds value-union extent");
+    }
     var target = min + (max - min) * percent / 100;
 
     var val[1224];
@@ -203,7 +225,12 @@ fn vani_mixer_get_volume(m, elem_name): i64 {
         return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_READ failed");
     }
     var raw = load64(&val + CTL_ELEM_VALUE_INT_BASE);
+    # `raw` is kernel-supplied; nothing guarantees it lands inside
+    # [min,max], and the caller's contract is a percentage. Clamp rather
+    # than hand back a nonsense number.
     var percent = (raw - min) * 100 / (max - min);
+    if (percent < 0)   { percent = 0; }
+    if (percent > 100) { percent = 100; }
     return vani_ok(percent);
 }
 
@@ -229,6 +256,16 @@ fn vani_mixer_set_mute(m, elem_name, muted): i64 {
           "element is not BOOLEAN-typed");
     }
     var count = load32(&info + CTL_ELEM_INFO_COUNT);
+    # Same unbounded-count stack overflow as vani_mixer_set_volume; this
+    # path additionally had no count == 0 guard. Both closed at 1.2.0.
+    if (count <= 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_INFO count is zero or negative");
+    }
+    if (count > CTL_ELEM_VALUE_MAX_COUNT) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_INFO count exceeds value-union extent");
+    }
     var alsa_value = 1;
     if (muted == 1) { alsa_value = 0; }
 
@@ -250,6 +287,21 @@ fn vani_mixer_set_mute(m, elem_name, muted): i64 {
 fn vani_mixer_get_mute(m, elem_name): i64 {
     if (m == 0)         { return vani_err_result(VANI_ERR_MIXER_ELEM); }
     if (elem_name == 0) { return vani_err_result(VANI_ERR_MIXER_ELEM); }
+
+    # Type gate. Its three siblings (set_volume, get_volume, set_mute)
+    # all check ELEM_INFO type before touching the value union; this one
+    # did not, so an INTEGER or ENUMERATED element named like a mute
+    # switch was read as a boolean and silently misreported. Added 1.2.0.
+    var info[272];
+    var ir = _vani_mixer_elem_info(m, elem_name, &info);
+    if (ir < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM, "ELEM_INFO failed");
+    }
+    var t = load32(&info + CTL_ELEM_INFO_TYPE);
+    if (t != SNDRV_CTL_ELEM_TYPE_BOOLEAN) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "element is not BOOLEAN-typed");
+    }
 
     var val[1224];
     memset(&val, 0, CTL_ELEM_VALUE_SIZE);
@@ -284,6 +336,17 @@ enum VaniMixerListLayout {
     VANI_LIST_CAPACITY = 16;
 }
 
+# Upper bound on the element count we will accept from the kernel.
+# `count` arrives from SNDRV_CTL_IOCTL_ELEM_LIST and drives an
+# allocation of `count * 64` bytes, so it is untrusted external data
+# in exactly the sense CLAUDE.md forbids using unvalidated. 4096 is
+# ~40x the largest real card (a busy HDA codec exposes well under 100
+# controls) and caps the allocation at 256 KB. Added at 1.2.0 (P(-1)
+# sweep, finding L-4).
+enum VaniMixerBounds {
+    VANI_MIXER_MAX_ELEMS = 4096;
+}
+
 fn vani_mixer_list_count(lh): i64 { return load64(lh + VANI_LIST_COUNT); }
 fn vani_mixer_list_pids(lh): i64 { return load64(lh + VANI_LIST_PIDS); }
 
@@ -315,17 +378,36 @@ fn vani_mixer_list_elements(m): i64 {
           "ELEM_LIST count pass failed");
     }
     var count = load32(&list + CTL_ELEM_LIST_COUNT);
+    # Untrusted: `count` comes straight from the kernel and sizes the
+    # allocation below. Reject anything past the sane ceiling rather
+    # than multiplying it by 64 first.
+    if (count < 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_LIST negative count");
+    }
+    if (count > VANI_MIXER_MAX_ELEMS) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "ELEM_LIST count exceeds bound");
+    }
     if (count == 0) {
-        var lh = alloc(VANI_LIST_SIZE);
-        store64(lh + VANI_LIST_COUNT, 0);
-        store64(lh + VANI_LIST_PIDS, 0);
-        store64(lh + VANI_LIST_CAPACITY, 0);
-        return vani_ok(lh);
+        var lh0 = alloc(VANI_LIST_SIZE);
+        if (lh0 == 0) {
+            return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+              "list handle alloc failed");
+        }
+        store64(lh0 + VANI_LIST_COUNT, 0);
+        store64(lh0 + VANI_LIST_PIDS, 0);
+        store64(lh0 + VANI_LIST_CAPACITY, 0);
+        return vani_ok(lh0);
     }
 
     # Second pass: fill array.
     var cap = count * CTL_ELEM_ID_SIZE;
     var pids = alloc(cap);
+    if (pids == 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "element id array alloc failed");
+    }
     memset(pids, 0, cap);
     memset(&list, 0, CTL_ELEM_LIST_SIZE);
     # space + pids fields below — list buffer is reused.
@@ -339,7 +421,21 @@ fn vani_mixer_list_elements(m): i64 {
     }
     var used = load32(&list + CTL_ELEM_LIST_USED);
 
+    # `used` is the kernel's count for the *fill* pass and is what
+    # vani_mixer_list_id_at bounds every index against — but the array
+    # was sized from the *count* pass. The card's element set can change
+    # between the two ioctls (hotplug, a driver adding controls), and a
+    # broken or hostile driver can simply report more than it wrote. If
+    # used > count, every caller iterating 0..used-1 reads past the
+    # allocation. Clamp to what we actually allocated.
+    if (used < 0)     { used = 0; }
+    if (used > count) { used = count; }
+
     var lh = alloc(VANI_LIST_SIZE);
+    if (lh == 0) {
+        return vani_err_result_msg(VANI_ERR_MIXER_ELEM,
+          "list handle alloc failed");
+    }
     store64(lh + VANI_LIST_COUNT, used);
     store64(lh + VANI_LIST_PIDS,  pids);
     store64(lh + VANI_LIST_CAPACITY, cap);
