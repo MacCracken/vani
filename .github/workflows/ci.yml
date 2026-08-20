@@ -141,8 +141,16 @@ jobs:
         run: |
           cyrius distlib
           cyrius distlib core
+          # Covers the .deps sidecars as well as the .cyr bundles. The
+          # sidecars are what a consumer's `cyrius deps` reads to resolve
+          # vani's stdlib leaves, so a stale one breaks downstream builds
+          # while both bundles look fine. Self-healing in practice — every
+          # release bumps the version stamp inside the .cyr files, which
+          # forces a distlib run that rewrites the sidecars in the same
+          # operation — but "in practice" is not a gate. Added at 1.2.2.
           fail=0
-          for bundle in dist/vani.cyr dist/vani-core.cyr; do
+          for bundle in dist/vani.cyr dist/vani-core.cyr \
+                        dist/vani.deps dist/vani-core.deps; do
             if ! git diff --quiet "$bundle"; then
               echo "ERROR: $bundle is stale. Run 'cyrius distlib [core]' and commit the result."
               git --no-pager diff "$bundle" | head -40

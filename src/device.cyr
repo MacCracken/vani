@@ -372,7 +372,10 @@ fn vani_open_yukti(desc): i64 {
 # Cheap (one ioctl, one alloc). Doesn't recurse / iterate.
 
 fn _negotiate_format_pick(hwp, preferred_fmt): i64 {
-    var fmt_mask_idx = SNDRV_PCM_HW_PARAM_FORMAT;
+    # Mask slot = param - FIRST_MASK, symmetric with the interval
+    # slots above. See the note in src/alsa.cyr's mask writers.
+    var fmt_mask_idx = SNDRV_PCM_HW_PARAM_FORMAT
+    - SNDRV_PCM_HW_PARAM_FIRST_MASK;
     if (_hwp_mask_has_bit(hwp, fmt_mask_idx, preferred_fmt) == 1) {
         return preferred_fmt;
     }
@@ -394,12 +397,6 @@ fn _negotiate_format_pick(hwp, preferred_fmt): i64 {
     return 0 - 1;
 }
 
-fn _clamp(value, lo, hi): i64 {
-    if (value < lo) { return lo; }
-    if (value > hi) { return hi; }
-    return value;
-}
-
 fn vani_format_negotiate(d, preferred): i64 {
     if (d == 0)         { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
     if (preferred == 0) { return vani_err_result(VANI_ERR_FORMAT_UNSUPPORTED); }
@@ -413,15 +410,25 @@ fn vani_format_negotiate(d, preferred): i64 {
     var ch_slot   = SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
     var rate_slot = SNDRV_PCM_HW_PARAM_RATE     - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL;
 
-    var ch_pick = _clamp(
-      vani_format_channels(preferred),
-      _hwp_interval_min(&hwp, ch_slot),
-      _hwp_interval_max(&hwp, ch_slot));
+    # _hwp_interval_clamp honours the openmin / openmax / empty flags the
+    # kernel sets on each interval; the plain _clamp this used through
+    # 1.2.1 treated every interval as the closed range [min, max] and so
+    # could return an endpoint the device had explicitly excluded. It
+    # returns -1 when the interval is empty or inverted, which is a real
+    # "this device cannot do it" answer rather than a pick.
+    var ch_pick = _hwp_interval_clamp(&hwp, ch_slot,
+      vani_format_channels(preferred));
+    if (ch_pick < 0) {
+        return vani_err_result_msg(VANI_ERR_FORMAT_UNSUPPORTED,
+          "device advertises no usable channel count");
+    }
 
-    var rate_pick = _clamp(
-      vani_format_rate(preferred),
-      _hwp_interval_min(&hwp, rate_slot),
-      _hwp_interval_max(&hwp, rate_slot));
+    var rate_pick = _hwp_interval_clamp(&hwp, rate_slot,
+      vani_format_rate(preferred));
+    if (rate_pick < 0) {
+        return vani_err_result_msg(VANI_ERR_FORMAT_UNSUPPORTED,
+          "device advertises no usable rate");
+    }
 
     var fmt_pick = _negotiate_format_pick(&hwp, vani_format_alsa(preferred));
     if (fmt_pick < 0) {

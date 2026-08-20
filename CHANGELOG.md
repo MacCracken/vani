@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-08-20
+
+Closes the structural items the 1.2.0 P(-1) sweep left open — the ones that needed a
+design decision rather than an edit. No API change (109 / 25), pin unchanged at 6.5.32.
+
+### Added
+
+- **A testability seam for the recovery paths, and an ADR explaining the shape of it.**
+  The sweep's largest open finding was that XRUN recovery, suspend/resume and the
+  disconnect path had no coverage and no way to get any — reaching them needs a kernel
+  that returns `-EPIPE` / `-ESTRPIPE` on demand. Two of 1.2.0's defects lived exactly
+  there.
+
+  The decision "a transfer failed — what now?" is now a pure function,
+  `_vani_recovery_for(xfer_result, state)` in `src/error.cyr`, and both `vani_play` and
+  `vani_record` classify through it before acting. The classification is tested
+  exhaustively: every kernel state including ones vani has never seen, `-1` for a failed
+  `STATUS` ioctl, and every action.
+
+  **A mockable ioctl indirection was considered and declined** — it would put an indirect
+  call on the transfer path and a DCE-defeating global in code that four consumers vendor
+  into games, to test a path none of them can trigger differently. Reasoning, and the
+  residue it leaves untested, are in
+  [ADR 0004](docs/adr/0004-recovery-policy-seam.md).
+
+### Fixed
+
+- **`snd_interval` open/empty flags were declared and never read** (`src/alsa.cyr`).
+  `AlsaIntervalFlag` has existed since v0.2.0; nothing consulted it, so every interval was
+  treated as the closed range `[min, max]`. ALSA uses `openmin` / `openmax` to mean the
+  endpoint is *excluded*, so `vani_format_negotiate` could clamp a request onto a rate or
+  channel count the device had just told us it does not accept — returning `Ok` for a
+  format `HW_PARAMS` then rejects.
+
+  New `_hwp_interval_flags` / `_hwp_interval_lo` / `_hwp_interval_hi` /
+  `_hwp_interval_is_empty` / `_hwp_interval_clamp` honour all three flags, and
+  `_hwp_interval_contains` (previously kept alive only by its own test) now does too. An
+  empty or inverted interval yields −1 — "this device cannot do it" — rather than a
+  bogus pick, and `vani_format_negotiate` surfaces that as a named error.
+
+- **Six mask call sites relied implicitly on `FIRST_MASK == 0`**, asymmetric with the
+  twelve interval sites that subtract `FIRST_INTERVAL` explicitly. Now symmetric. Costs
+  nothing: same unreachable-fn count, same NOPed bytes, same `R+E` segment size — the
+  emitted code is the same size, laid out differently. It buys real robustness a test
+  cannot: were `FIRST_MASK` ever renumbered, the subtraction adapts while an assertion on
+  the slot values would still pass.
+
+- **`_clamp` removed** — dead in production once negotiation moved to
+  `_hwp_interval_clamp`, and referenced only by its own test.
+
+- **CI's distlib drift gate now covers the `.deps` sidecars**, not just the two `.cyr`
+  bundles. The sidecars are what a consumer's `cyrius deps` reads, so a stale one breaks
+  downstream builds while both bundles look fine. Self-healing in practice; "in practice"
+  is not a gate. Verified to fire on a tampered sidecar.
+
+### Added — tests
+
+**852 → 893 assertions**, and reference coverage reaches **109/109 (100%)**, 8/8 files.
+All 140 `src` functions are now genuinely *called* from tests — `cyrius coverage` counts a
+bare mention, so the last one (`vani_err_print_name`) was actually invoked rather than
+left to inflate the number.
+
+New coverage: the recovery policy (6 tests), the interval flags (7), and the residue that
+was reachable without hardware — open/configure failure paths, the observability
+emitters, `_vani_mixer_elem_info` against a closed fd, `_hwp_interval_flags` directly.
+
+Every new group was **mutation-tested**. That caught a defect in my own work: a
+"DISCONNECTED outranks SUSPENDED" precedence test passed even with the checks reordered,
+because kernel states are distinct scalars and the branches are mutually exclusive —
+there is no precedence to assert. The source comment claiming the ordering was
+"deliberate and asserted" was wrong and is corrected; the test was replaced with one that
+pins what actually matters (each action is produced by exactly one state), which does
+catch a collapse mutant.
+
+### Verified
+
+- `cyrius test` **893/893**; lint 0 warnings / 0 untracked deferrals; fmt clean; vet
+  clean; distlib regenerates clean; `CYRIUS_DCE=1` builds clean with zero warnings on
+  x86_64 / aarch64 / agnos; all 9 programs build; security scan clean.
+- **Benchmarks: no regression, measured the right way this time.** A same-session A/B
+  against tag `1.2.1` — the method the 1.2.1 audit concluded should be the default —
+  gives `ring_200ms_playback` 84,735 / 83,838 (1.2.1) vs 83,065 / 83,444 (1.2.2),
+  `hwp_init_any` 918 / 937 vs 945 / 905, and `hwp_interval_set_exact` **9 vs 9**. That
+  last one also retires the "+1 ns" 1.2.1 reported for its new range guard: it was noise.
+- Binary: x86_64 515,320 → **515,432 B**; aarch64 → 744,656; agnos → 494,144.
+
 ## [1.2.1] — 2026-08-20
 
 The tail of the 1.2.0 P(-1) sweep. 1.2.0 shipped with seven code-level P2 items filed

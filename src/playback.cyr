@@ -25,9 +25,20 @@ fn vani_play(d, buf, frames): i64 {
     var h = vani_audio_handle(d);
     var written = audio_write(h, buf, frames);
     if (written >= 0) { return vani_ok(written); }
-    # Negative return: try to recover from XRUN or SUSPENDED once.
+
+    # Classify, then act. The classification is _vani_recovery_for — a
+    # pure function tested exhaustively over every (result, state) pair
+    # in tests/tcyr/vani.tcyr. What remains below is the transport: issue
+    # the ioctls the decision calls for and retry once. Split at 1.2.2;
+    # see docs/adr/0004-recovery-policy-seam.md.
     var st = audio_get_state(h);
-    if (st == SND_PCM_STATE_XRUN) {
+    var act = _vani_recovery_for(written, st);
+
+    if (act == VANI_RECOVERY_GONE) {
+        # Device is gone — retrying would spin against a dead handle.
+        return vani_err_result(VANI_ERR_DISCONNECTED);
+    }
+    if (act == VANI_RECOVERY_REPREPARE) {
         vani_xrun_inc(d);
         var pr = audio_prepare(h);
         if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
@@ -35,15 +46,8 @@ fn vani_play(d, buf, frames): i64 {
         if (written >= 0) { return vani_ok(written); }
         return vani_err_result(VANI_ERR_UNDERRUN);
     }
-    if (st == SND_PCM_STATE_DISCONNECTED) {
-        # Device is gone — no recovery is possible and retrying would
-        # spin. Surface the specific code rather than the generic one.
-        # VANI_ERR_DISCONNECTED existed as a public code since v0.2.0 but
-        # was produced by no path until 1.2.1.
-        return vani_err_result(VANI_ERR_DISCONNECTED);
-    }
-    if (st == SND_PCM_STATE_SUSPENDED) {
-        # Try resume; fall back to prepare if kernel doesn't support it.
+    if (act == VANI_RECOVERY_RESUME) {
+        # Try resume; fall back to prepare if the kernel lacks it.
         var rr = audio_resume(h);
         if (rr < 0) {
             var pr = audio_prepare(h);

@@ -2,7 +2,8 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest audit at
-`docs/audit/2026-08-20-v1.2.1-audit.md` (priors:
+`docs/audit/2026-08-20-v1.2.2-audit.md` (priors:
+`docs/audit/2026-08-20-v1.2.1-audit.md`,
 `docs/audit/2026-08-20-v1.2.0-audit.md`,
 `docs/audit/2026-08-20-v1.1.4-audit.md`,
 `docs/audit/2026-07-19-v1.1.2-audit.md`,
@@ -23,43 +24,31 @@ control: reintroducing the +2 offset fails 14 assertions.
 
 ## Open — P2
 
-Filed by the 1.2.0 P(-1) sweep. The code-level items it filed were all closed
-within the same release; what remains is structural.
+Everything the 1.2.0 P(-1) sweep filed is now closed (1.2.1 took the code-level
+items, 1.2.2 the structural ones). What follows is what 1.2.2 itself leaves.
 
-- [ ] **Test coverage for the 22 frozen-but-uncalled public symbols.**
-      [ADR 0002](../adr/0002-freeze-full-vani-surface-at-1.0.md) forbids removing
-      them, so the actionable output is coverage, not deletion. 1.2.0 took
-      reference coverage to 97% (106/109 fns); these are the residue.
-- [ ] **A seam for the XRUN / suspend / short-write paths.** Recovery, resume and
-      partial-transfer branches cannot be exercised without either real hardware
-      or an injectable ioctl seam. The 1.2.0 sweep concluded explicitly that more
-      assertions cannot reach them — this needs a design decision, not more tests.
-      The largest genuine coverage gap left in the tree.
-- [ ] **`vani_format_negotiate` clamps as if `snd_interval` were continuous** and
-      never re-refines with the chosen format, so it can return Ok for a format
-      that HW_PARAMS then rejects. Cannot be tested from a CPU-only suite — it
-      builds its own hwp via `audio_query_caps`, which fails closed on any fd a
-      test can supply. Pairs with the seam item above.
-- [ ] **Extend the distlib drift gate to the `.deps` sidecars**
-      (`.github/workflows/ci.yml`) — covers only the two `.cyr` bundles. Effectively
-      self-healing today: every release bumps the `# Version:` stamp inside both
-      `.cyr` files, forcing a `cyrius distlib` run that rewrites the sidecars in
-      the same operation. Low value; listed for completeness.
-- [ ] **Six mask call sites pass the HW param number straight in as a mask index**,
-      relying on `FIRST_MASK == 0` — asymmetric with the twelve interval sites that
-      subtract `FIRST_INTERVAL` explicitly. Correct today and pinned by tests;
-      cosmetic consistency only.
-
-### Closed at 1.2.1 (the seven items 1.2.0 carried forward)
-
-Handle invalidation on close · `VANI_ERR_DISCONNECTED` dead taxonomy entry and the
-missing `SND_PCM_STATE_DISCONNECTED` (which also meant the retry logic treated an
-unplugged device as recoverable) · i64 → u32 truncation in `_hwp_interval_set_exact` ·
-the missing `[0,255]` bound in `_hwp_mask_set_value` · `avail_min == 0` reaching the
-kernel · the stale `boundary` field documentation · four comments referencing the
-deleted stdlib `audio.cyr`.
-
-See [`docs/audit/2026-08-20-v1.2.1-audit.md`](../audit/2026-08-20-v1.2.1-audit.md).
+- [ ] **The prepare→retry sequence is still untested.** 1.2.2 made the recovery
+      *decision* a pure function and covered it exhaustively; nothing proves the
+      ioctls it calls for are issued in the right order, or that the retry happens
+      exactly once. Narrower than the original gap, but real.
+      [ADR 0004](../adr/0004-recovery-policy-seam.md) states the condition for
+      revisiting: if recovery gains retry budgets, backoff, or per-direction
+      policy, the sequence stops being reviewable at a glance and a mockable
+      indirection becomes worth its cost.
+- [ ] **`vani_format_negotiate` does not re-refine jointly.** Each dimension is
+      now clamped correctly against its own interval (1.2.2 fixed the open/empty
+      flags), but nothing re-runs `HW_REFINE` with the chosen rate + channels +
+      format together, so a combination whose parts are individually legal can
+      still be rejected by `HW_PARAMS`. Needs a second ioctl round-trip, which
+      cannot be verified without hardware — deliberately not added blind.
+- [ ] **No real-hardware verification anywhere in the 1.2.x line.** `/dev/snd` is
+      EACCES for the shell these releases were built in (the logind ACL grants
+      `sddm`). Enumeration works under yukti 2.3.8 and every program degrades
+      closed, but **nothing has been played**. The last audible confirmation is
+      cyrius-doom 0.30.5 (2026-06-29). Several defects fixed across 1.2.0-1.2.2 —
+      the S24_LE frame stride, the format that never reached the kernel, the
+      ring-consume ordering — sit on paths only real playback exercises. Run the
+      eight real-HW programs plus `./build/vani_tone` from a desktop seat session.
 
 **Declined, recorded so they are not re-litigated** (all assessed in the 1.2.0
 sweep and argued against on the merits):

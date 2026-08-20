@@ -543,10 +543,60 @@ fn _hwp_interval_max(hwp, int_idx): i64 {
     return load32(hwp + _hwp_interval_off(int_idx) + 4);
 }
 
+# snd_interval carries flag bits at +8 that say whether the endpoints
+# are INCLUDED. `openmin` means the interval is (min, max] — min itself
+# is excluded — and `openmax` likewise excludes max. `empty` means the
+# device supports nothing in this dimension at all.
+#
+# These bits were declared in enum AlsaIntervalFlag from v0.2.0 and read
+# NOWHERE until 1.2.2, so every interval was treated as the closed range
+# [min, max]. That is why vani_format_negotiate could hand back a rate or
+# channel count the device had just told us it excludes, which HW_PARAMS
+# then rejects — an Ok result that cannot be configured.
+fn _hwp_interval_flags(hwp, int_idx): i64 {
+    return load32(hwp + _hwp_interval_off(int_idx) + 8);
+}
+
+fn _hwp_interval_is_empty(hwp, int_idx): i64 {
+    return (_hwp_interval_flags(hwp, int_idx) >> 3) & 1;
+}
+
+# Lowest value the device actually accepts, honouring openmin.
+fn _hwp_interval_lo(hwp, int_idx): i64 {
+    var lo = _hwp_interval_min(hwp, int_idx);
+    if ((_hwp_interval_flags(hwp, int_idx) & SND_INTERVAL_OPENMIN) != 0) {
+        return lo + 1;
+    }
+    return lo;
+}
+
+# Highest value the device actually accepts, honouring openmax.
+fn _hwp_interval_hi(hwp, int_idx): i64 {
+    var hi = _hwp_interval_max(hwp, int_idx);
+    if ((_hwp_interval_flags(hwp, int_idx) & SND_INTERVAL_OPENMAX) != 0) {
+        return hi - 1;
+    }
+    return hi;
+}
+
 fn _hwp_interval_contains(hwp, int_idx, value): i64 {
-    if (value < _hwp_interval_min(hwp, int_idx)) { return 0; }
-    if (value > _hwp_interval_max(hwp, int_idx)) { return 0; }
+    if (_hwp_interval_is_empty(hwp, int_idx) == 1) { return 0; }
+    if (value < _hwp_interval_lo(hwp, int_idx))    { return 0; }
+    if (value > _hwp_interval_hi(hwp, int_idx))    { return 0; }
     return 1;
+}
+
+# Clamp `value` into what the device accepts. Returns -1 if the interval
+# is empty or inverted (lo > hi after the open-flag adjustment), which
+# the caller must treat as "no usable value", NOT as a picked one.
+fn _hwp_interval_clamp(hwp, int_idx, value): i64 {
+    if (_hwp_interval_is_empty(hwp, int_idx) == 1) { return 0 - 1; }
+    var lo = _hwp_interval_lo(hwp, int_idx);
+    var hi = _hwp_interval_hi(hwp, int_idx);
+    if (lo > hi)    { return 0 - 1; }
+    if (value < lo) { return lo; }
+    if (value > hi) { return hi; }
+    return value;
 }
 
 # ================================================================
@@ -714,17 +764,26 @@ fn audio_set_params_fmt(dev, rate, channels, alsa_fmt, period_frames, buffer_fra
     var hwp[608];
     _hwp_init_any(&hwp);
 
+    # Mask slot = param - FIRST_MASK, mirroring how the interval sites
+    # below compute `param - FIRST_INTERVAL`. FIRST_MASK is 0 today, so
+    # these sites passed the param number straight in through 1.2.1 and
+    # were correct by coincidence; if the UAPI ever renumbered the mask
+    # group the interval sites would adapt and these would silently
+    # address the wrong mask. Made explicit at 1.2.2.
+    #
     # ACCESS = RW_INTERLEAVED. Most reliable across drivers.
     _hwp_mask_set_value(&hwp,
-      SNDRV_PCM_HW_PARAM_ACCESS,
+      SNDRV_PCM_HW_PARAM_ACCESS - SNDRV_PCM_HW_PARAM_FIRST_MASK,
       SND_PCM_ACCESS_RW_INTERLEAVED);
 
     # FORMAT — the caller's exact AlsaFormat, not a width-derived guess.
-    _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
+    _hwp_mask_set_value(&hwp,
+      SNDRV_PCM_HW_PARAM_FORMAT - SNDRV_PCM_HW_PARAM_FIRST_MASK,
+      fmt);
 
     # SUBFORMAT = STD. Required — leaving "any" rejects on some drivers.
     _hwp_mask_set_value(&hwp,
-      SNDRV_PCM_HW_PARAM_SUBFORMAT,
+      SNDRV_PCM_HW_PARAM_SUBFORMAT - SNDRV_PCM_HW_PARAM_FIRST_MASK,
       SND_PCM_SUBFORMAT_STD);
 
     # CHANNELS, RATE — exact. interval slot = param - FIRST_INTERVAL.
@@ -879,11 +938,13 @@ fn audio_can_set_params(dev, rate, channels, bit_depth): i64 {
     var hwp[608];
     _hwp_init_any(&hwp);
     _hwp_mask_set_value(&hwp,
-      SNDRV_PCM_HW_PARAM_ACCESS,
+      SNDRV_PCM_HW_PARAM_ACCESS - SNDRV_PCM_HW_PARAM_FIRST_MASK,
       SND_PCM_ACCESS_RW_INTERLEAVED);
-    _hwp_mask_set_value(&hwp, SNDRV_PCM_HW_PARAM_FORMAT, fmt);
     _hwp_mask_set_value(&hwp,
-      SNDRV_PCM_HW_PARAM_SUBFORMAT,
+      SNDRV_PCM_HW_PARAM_FORMAT - SNDRV_PCM_HW_PARAM_FIRST_MASK,
+      fmt);
+    _hwp_mask_set_value(&hwp,
+      SNDRV_PCM_HW_PARAM_SUBFORMAT - SNDRV_PCM_HW_PARAM_FIRST_MASK,
       SND_PCM_SUBFORMAT_STD);
     _hwp_interval_set_exact(&hwp,
       SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL,

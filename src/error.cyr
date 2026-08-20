@@ -167,3 +167,51 @@ fn vani_err_print_name(code): i64 {
     sys_write(2, name, strlen(name));
     return 0;
 }
+
+# ================================================================
+# Transfer-recovery policy (1.2.2)
+# ================================================================
+# The decision "a transfer just failed — what now?" is separated from
+# the ioctls that act on it, so it can be tested exhaustively without a
+# device. This is the answer to the coverage gap the 1.2.0 P(-1) sweep
+# filed: XRUN recovery, suspend/resume and the disconnect path could not
+# be exercised at all, because reaching them requires a kernel that
+# returns -EPIPE / -ESTRPIPE on demand.
+#
+# What this DOES cover: the classification, its precedence, and its
+# behaviour on every kernel state including ones vani has never seen.
+# What it does NOT cover: that the subsequent prepare/resume/retry
+# sequence is issued correctly. That residue is six lines per direction
+# and is verified by reading, not by test. See
+# docs/adr/0004-recovery-policy-seam.md for why a mockable ioctl
+# indirection was declined rather than built.
+#
+# Pure: no ioctls, no allocation, no side effects, no `d` handle.
+
+enum VaniRecovery {
+    VANI_RECOVERY_OK        = 0;  # transfer succeeded — nothing to do
+    VANI_RECOVERY_REPREPARE = 1;  # XRUN: count it, prepare, retry once
+    VANI_RECOVERY_RESUME    = 2;  # SUSPENDED: resume (or prepare), retry once
+    VANI_RECOVERY_GONE      = 3;  # DISCONNECTED: fail, never retry
+    VANI_RECOVERY_FAIL      = 4;  # unrecoverable — caller's generic error
+}
+
+# `xfer_result` is the raw return of audio_write / audio_read.
+# `state` is audio_get_state()'s result, which may be -1 if the STATUS
+# ioctl itself failed — that is an unrecoverable device, not a retry.
+#
+# The state tests are mutually exclusive (kernel states are distinct
+# scalars), so the order below is a readability choice and NOT a
+# correctness one. An earlier draft of this comment claimed the
+# DISCONNECTED-before-SUSPENDED ordering was load-bearing and asserted;
+# mutation-testing the suite disproved it — reordering the checks leaves
+# every assertion green. What the tests do pin is that each state maps to
+# exactly one action and that no two states collide, which is the
+# property that actually matters.
+fn _vani_recovery_for(xfer_result, state): i64 {
+    if (xfer_result >= 0)                    { return VANI_RECOVERY_OK; }
+    if (state == SND_PCM_STATE_DISCONNECTED) { return VANI_RECOVERY_GONE; }
+    if (state == SND_PCM_STATE_XRUN)         { return VANI_RECOVERY_REPREPARE; }
+    if (state == SND_PCM_STATE_SUSPENDED)    { return VANI_RECOVERY_RESUME; }
+    return VANI_RECOVERY_FAIL;
+}

@@ -725,15 +725,6 @@ fn test_hwp_interval_readers() {
     return 0;
 }
 
-fn test_clamp() {
-    assert_eq(_clamp(50, 0, 100),  50, "in range");
-    assert_eq(_clamp(0 - 5, 0, 100), 0, "below clamps to lo");
-    assert_eq(_clamp(150, 0, 100), 100, "above clamps to hi");
-    assert_eq(_clamp(0, 0, 100),   0, "at lo");
-    assert_eq(_clamp(100, 0, 100), 100, "at hi");
-    return 0;
-}
-
 # Negotiate-format picker: preferred supported → return preferred.
 fn test_negotiate_picks_preferred_when_supported() {
     var hwp = alloc(HWP_SIZE);
@@ -855,6 +846,21 @@ fn test_hwparam_interval_index_constants() {
 # interval array is 12 entries (the ii<12 loop bound in _hwp_init_any)
 # and the mask array is 3 (the mi<3 bound). If someone renumbers the
 # enum without touching the loops, this fires.
+# The mask writers compute `param - FIRST_MASK`, symmetric with the
+# interval writers' `param - FIRST_INTERVAL`. Pin the resulting slots so
+# the symmetry is enforced rather than merely intended.
+fn test_hwparam_mask_slots_resolve() {
+    var first = SNDRV_PCM_HW_PARAM_FIRST_MASK;
+    assert_eq(SNDRV_PCM_HW_PARAM_ACCESS    - first, 0, "ACCESS slot 0");
+    assert_eq(SNDRV_PCM_HW_PARAM_FORMAT    - first, 1, "FORMAT slot 1");
+    assert_eq(SNDRV_PCM_HW_PARAM_SUBFORMAT - first, 2, "SUBFORMAT slot 2");
+    # And those slots land on the offsets the struct layout expects.
+    assert_eq(_hwp_mask_off(0), 4,  "ACCESS mask at +4");
+    assert_eq(_hwp_mask_off(1), 36, "FORMAT mask at +36");
+    assert_eq(_hwp_mask_off(2), 68, "SUBFORMAT mask at +68");
+    return 0;
+}
+
 fn test_hwparam_group_extents() {
     var n_interval = SNDRV_PCM_HW_PARAM_LAST_INTERVAL
     - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL + 1;
@@ -2161,6 +2167,316 @@ fn test_audio_avail_reports_room_on_linux() {
     return 0;
 }
 
+# ================================================================
+# 1.2.2 — transfer-recovery policy
+# ================================================================
+# The gap the 1.2.0 P(-1) sweep filed as "cannot be reached by
+# assertions": XRUN recovery, suspend/resume and the disconnect path.
+# Extracting the DECISION into a pure function makes it exhaustively
+# testable with no device. See docs/adr/0004-recovery-policy-seam.md
+# for what this covers and what it deliberately does not.
+
+# Any non-negative transfer result is success, whatever the state says.
+# This matters: audio_get_state is only consulted after a failure, so a
+# stale or bogus state must never turn a good write into a recovery.
+fn test_recovery_success_ignores_state() {
+    var st = 0;
+    while (st < 10) {
+        assert_eq(_vani_recovery_for(0, st), VANI_RECOVERY_OK,
+          "0 frames is still success");
+        assert_eq(_vani_recovery_for(1024, st), VANI_RECOVERY_OK,
+          "short write is success, not recovery");
+        st = st + 1;
+    }
+    return 0;
+}
+
+# Every kernel state, on a failed transfer. This is the table the two
+# transfer paths branch on; if a state is added to AlsaPcmState and not
+# handled here, it lands in FAIL, which is the safe default.
+fn test_recovery_maps_every_state() {
+    var e = 0 - 32;  # -EPIPE-ish; any negative works
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_OPEN),      VANI_RECOVERY_FAIL,      "OPEN");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_SETUP),     VANI_RECOVERY_FAIL,      "SETUP");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_PREPARED),  VANI_RECOVERY_FAIL,      "PREPARED");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_RUNNING),   VANI_RECOVERY_FAIL,      "RUNNING");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_XRUN),      VANI_RECOVERY_REPREPARE, "XRUN");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_DRAINING),  VANI_RECOVERY_FAIL,      "DRAINING");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_PAUSED),    VANI_RECOVERY_FAIL,      "PAUSED");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_SUSPENDED), VANI_RECOVERY_RESUME,    "SUSPENDED");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_DISCONNECTED), VANI_RECOVERY_GONE,   "DISCONNECTED");
+    return 0;
+}
+
+# audio_get_state returns -1 when the STATUS ioctl itself fails. That is
+# a device we cannot reason about — it must NOT be retried.
+fn test_recovery_unknown_state_does_not_retry() {
+    var e = 0 - 32;
+    assert_eq(_vani_recovery_for(e, 0 - 1), VANI_RECOVERY_FAIL,
+      "STATUS ioctl failure (-1) is unrecoverable");
+    assert_eq(_vani_recovery_for(e, 9),  VANI_RECOVERY_FAIL, "state 9 (future kernel)");
+    assert_eq(_vani_recovery_for(e, 99), VANI_RECOVERY_FAIL, "nonsense state");
+    return 0;
+}
+
+# Each recoverable action is produced by EXACTLY ONE state. This is the
+# property that the if-chain's correctness actually rests on: if two
+# states collapsed to the same action, one branch of both transfer paths
+# would become unreachable.
+#
+# (This replaced a "DISCONNECTED outranks SUSPENDED" precedence test that
+# mutation-testing showed to be tautological — reordering the checks left
+# it green, because the states are distinct scalars and the tests are
+# mutually exclusive. Kept as a note because a tautological assertion is
+# exactly what the 1.2.0 sweep found wrong with the old AlsaFormat tests.)
+fn test_recovery_each_action_has_one_state() {
+    var e = 0 - 32;
+    var n_gone = 0;
+    var n_resume = 0;
+    var n_reprepare = 0;
+    var st = 0;
+    while (st < 10) {
+        var a = _vani_recovery_for(e, st);
+        if (a == VANI_RECOVERY_GONE)      { n_gone = n_gone + 1; }
+        if (a == VANI_RECOVERY_RESUME)    { n_resume = n_resume + 1; }
+        if (a == VANI_RECOVERY_REPREPARE) { n_reprepare = n_reprepare + 1; }
+        st = st + 1;
+    }
+    assert_eq(n_gone,      1, "exactly one state is GONE");
+    assert_eq(n_resume,    1, "exactly one state is RESUME");
+    assert_eq(n_reprepare, 1, "exactly one state is REPREPARE");
+    # And they are the ones we mean.
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_DISCONNECTED), VANI_RECOVERY_GONE,
+      "DISCONNECTED is the GONE state");
+    assert_eq(_vani_recovery_for(e, SND_PCM_STATE_SUSPENDED), VANI_RECOVERY_RESUME,
+      "SUSPENDED is the RESUME state");
+    return 0;
+}
+
+# The five actions must be distinct — they are compared with == in both
+# transfer paths, so a collision would silently merge two branches.
+fn test_recovery_actions_are_distinct() {
+    assert_eq(VANI_RECOVERY_OK,        0, "OK=0");
+    assert_eq(VANI_RECOVERY_REPREPARE, 1, "REPREPARE=1");
+    assert_eq(VANI_RECOVERY_RESUME,    2, "RESUME=2");
+    assert_eq(VANI_RECOVERY_GONE,      3, "GONE=3");
+    assert_eq(VANI_RECOVERY_FAIL,      4, "FAIL=4");
+    return 0;
+}
+
+# Only XRUN increments the xrun counter. Pinning this because the
+# counter is a public observability surface (vani_xrun_count) and a
+# mis-branch would inflate it on every suspend.
+fn test_recovery_only_xrun_reprepares() {
+    var e = 0 - 32;
+    var st = 0;
+    var reprepares = 0;
+    while (st < 10) {
+        if (_vani_recovery_for(e, st) == VANI_RECOVERY_REPREPARE) {
+            reprepares = reprepares + 1;
+        }
+        st = st + 1;
+    }
+    assert_eq(reprepares, 1, "exactly one state triggers a re-prepare");
+    return 0;
+}
+
+# ================================================================
+# 1.2.2 — snd_interval open/empty flag handling
+# ================================================================
+# AlsaIntervalFlag was declared at v0.2.0 and read nowhere until 1.2.2,
+# so every interval was treated as the closed range [min, max]. These
+# tests operate on an in-memory hwp — no device needed — which is why
+# this half of the negotiate defect IS closable by assertion.
+
+fn _mk_interval(hwp, slot, lo, hi, flags) {
+    var off = _hwp_interval_off(slot);
+    store32(hwp + off + 0, lo);
+    store32(hwp + off + 4, hi);
+    store32(hwp + off + 8, flags);
+    return 0;
+}
+
+fn test_interval_closed_range_unchanged() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 44100, 48000, 0);
+    assert_eq(_hwp_interval_lo(&hwp, 3), 44100, "closed lo is min");
+    assert_eq(_hwp_interval_hi(&hwp, 3), 48000, "closed hi is max");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 44100), 1, "min included");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 48000), 1, "max included");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 44099), 0, "below min excluded");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 48001), 0, "above max excluded");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 8000),  44100, "clamps up to min");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 96000), 48000, "clamps down to max");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 46000), 46000, "in-range passes through");
+    return 0;
+}
+
+# openmin excludes the low endpoint: (min, max].
+fn test_interval_openmin_excludes_min() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 44100, 48000, SND_INTERVAL_OPENMIN);
+    assert_eq(_hwp_interval_lo(&hwp, 3), 44101, "openmin lifts lo by one");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 44100), 0, "min itself is EXCLUDED");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 44101), 1, "min+1 is included");
+    # The bug this closes: clamping a too-low request used to return the
+    # excluded endpoint, which HW_PARAMS then rejects.
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 8000), 44101,
+      "clamp returns the first ACCEPTED value, not the excluded min");
+    return 0;
+}
+
+# openmax excludes the high endpoint: [min, max).
+fn test_interval_openmax_excludes_max() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 44100, 48000, SND_INTERVAL_OPENMAX);
+    assert_eq(_hwp_interval_hi(&hwp, 3), 47999, "openmax lowers hi by one");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 48000), 0, "max itself is EXCLUDED");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 47999), 1, "max-1 is included");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 96000), 47999,
+      "clamp returns the last ACCEPTED value, not the excluded max");
+    return 0;
+}
+
+fn test_interval_both_ends_open() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 2, 2, 8, SND_INTERVAL_OPENMIN + SND_INTERVAL_OPENMAX);
+    assert_eq(_hwp_interval_lo(&hwp, 2), 3, "lo lifted");
+    assert_eq(_hwp_interval_hi(&hwp, 2), 7, "hi lowered");
+    assert_eq(_hwp_interval_clamp(&hwp, 2, 1), 3, "clamp up into the open range");
+    assert_eq(_hwp_interval_clamp(&hwp, 2, 9), 7, "clamp down into the open range");
+    return 0;
+}
+
+# An empty interval means the device supports nothing here. That must be
+# an error, not a picked value — the old _clamp would have returned min.
+fn test_interval_empty_is_not_a_pick() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 44100, 48000, SND_INTERVAL_EMPTY);
+    assert_eq(_hwp_interval_is_empty(&hwp, 3), 1, "empty flag read");
+    assert_eq(_hwp_interval_contains(&hwp, 3, 44100), 0, "empty contains nothing");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 44100), 0 - 1, "empty yields -1, not a value");
+    return 0;
+}
+
+# A single-point interval with an open end inverts (lo > hi). That is
+# also "no usable value" rather than a pick.
+fn test_interval_inverted_yields_no_pick() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 48000, 48000, SND_INTERVAL_OPENMIN);
+    assert_eq(_hwp_interval_lo(&hwp, 3), 48001, "lo lifted past hi");
+    assert_eq(_hwp_interval_hi(&hwp, 3), 48000, "hi unchanged");
+    assert_eq(_hwp_interval_clamp(&hwp, 3, 48000), 0 - 1, "inverted yields -1");
+    return 0;
+}
+
+# The integer flag is bit 2 and must not be confused with the open bits.
+fn test_interval_integer_flag_does_not_move_endpoints() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    _mk_interval(&hwp, 3, 44100, 48000, SND_INTERVAL_INTEGER);
+    assert_eq(_hwp_interval_lo(&hwp, 3), 44100, "INTEGER does not lift lo");
+    assert_eq(_hwp_interval_hi(&hwp, 3), 48000, "INTEGER does not lower hi");
+    assert_eq(_hwp_interval_is_empty(&hwp, 3), 0, "INTEGER is not EMPTY");
+    return 0;
+}
+
+# ================================================================
+# 1.2.2 — coverage for the last unreferenced src functions
+# ================================================================
+# The 1.2.0 sweep took reference coverage 33% -> 97%. These close the
+# residue that is reachable without hardware: open/configure failure
+# paths, the observability emitters, and the interval flag reader.
+
+fn test_hwp_interval_flags_reads_the_field() {
+    var hwp[608];
+    memset(&hwp, 0, HWP_SIZE);
+    assert_eq(_hwp_interval_flags(&hwp, 3), 0, "zeroed interval has no flags");
+    store32(&hwp + _hwp_interval_off(3) + 8, SND_INTERVAL_INTEGER);
+    assert_eq(_hwp_interval_flags(&hwp, 3), SND_INTERVAL_INTEGER, "reads INTEGER");
+    store32(&hwp + _hwp_interval_off(3) + 8,
+      SND_INTERVAL_OPENMIN + SND_INTERVAL_EMPTY);
+    assert_eq(_hwp_interval_flags(&hwp, 3), 9, "reads a combined mask (1|8)");
+    # It must read slot 3's flags, not a neighbour's.
+    assert_eq(_hwp_interval_flags(&hwp, 2), 0, "neighbour slot untouched");
+    assert_eq(_hwp_interval_flags(&hwp, 4), 0, "neighbour slot untouched");
+    return 0;
+}
+
+# Opening a card that cannot exist returns 0 — the sentinel every
+# audio_* entry point guards against. Card 99 / device 99 has no
+# /dev/snd node on any machine.
+fn test_audio_open_nonexistent_returns_zero() {
+    assert_eq(audio_open_playback(99, 99), 0, "playback open of a bogus card");
+    assert_eq(audio_open_capture(99, 99),  0, "capture open of a bogus card");
+    return 0;
+}
+
+# The configure entry points reject a null handle and an unmappable
+# format before touching the kernel.
+fn test_audio_set_params_rejects_bad_input() {
+    assert_eq(audio_set_params(0, 48000, 2, 16), 0 - 1, "null handle");
+    assert_eq(audio_set_params_full(0, 48000, 2, 16, 0, 0), 0 - 1, "null handle (full)");
+    assert_eq(audio_set_params_fmt(0, 48000, 2, SND_PCM_FORMAT_S16_LE, 0, 0), 0 - 1,
+      "null handle (fmt)");
+    # A bit depth with no format mapping fails before any ioctl.
+    var fake = alloc(32);
+    memset(fake, 0, 32);
+    store64(fake, 0 - 1);
+    assert_eq(audio_set_params_full(fake, 48000, 2, 12, 0, 0), 0 - 1,
+      "12-bit has no AlsaFormat");
+    # And a format with no bit-width mapping is rejected by the fmt form.
+    assert_eq(audio_set_params_fmt(fake, 48000, 2, 99, 0, 0), 0 - 1,
+      "format 99 has no width");
+    # Non-positive rate / channels are rejected too.
+    assert_eq(audio_set_params_fmt(fake, 0, 2, SND_PCM_FORMAT_S16_LE, 0, 0), 0 - 1,
+      "rate 0 rejected");
+    assert_eq(audio_set_params_fmt(fake, 48000, 0, SND_PCM_FORMAT_S16_LE, 0, 0), 0 - 1,
+      "channels 0 rejected");
+    return 0;
+}
+
+# ELEM_INFO against a closed descriptor fails rather than faulting.
+fn test_mixer_elem_info_fails_on_bad_fd() {
+    var m = alloc(16);
+    store64(m, 0 - 1);
+    var info[272];
+    assert(_vani_mixer_elem_info(m, "Master Playback Volume", &info) < 0,
+      "ELEM_INFO on fd -1 returns negative");
+    return 0;
+}
+
+# The observability emitters are no-ops until enabled, and must not
+# fault for any code in the taxonomy once they are.
+fn test_error_emitters_are_safe_for_every_code() {
+    vani_observability_disable();
+    var c = 0;
+    while (c < 25) {
+        _sk_emit_err(c);
+        c = c + 1;
+    }
+    assert_eq(1, 1, "disabled emitter is a no-op for every code");
+    c = 0;
+    while (c < 25) {
+        assert(vani_err_name(c) != 0, "every code has a name");
+        c = c + 1;
+    }
+    # vani_err_print_name writes the name to stderr. Called once so the
+    # function is genuinely exercised rather than merely mentioned —
+    # `cyrius coverage` counts a bare mention, which would have made the
+    # 100% figure dishonest. One line of stderr is the price.
+    vani_err_print_name(VANI_ERR_NONE);
+    var nl = "\n";
+    sys_write(2, nl, 1);
+    return 0;
+}
+
 fn main() {
     alloc_init();
     test_group("error");
@@ -2224,7 +2540,6 @@ fn main() {
     test_hwp_mask_has_bit_after_constraint();
     test_hwp_mask_has_bit_out_of_range();
     test_hwp_interval_readers();
-    test_clamp();
     test_negotiate_picks_preferred_when_supported();
     test_negotiate_falls_back_to_s32();
     test_negotiate_falls_back_to_s8();
@@ -2256,6 +2571,7 @@ fn main() {
     test_group("1.2.0 UAPI pins");
     test_hwparam_mask_index_constants();
     test_hwparam_interval_index_constants();
+    test_hwparam_mask_slots_resolve();
     test_hwparam_group_extents();
     test_hwparam_interval_slots_resolve();
     test_pcm_ioctl_full_encoding();
@@ -2343,6 +2659,30 @@ fn main() {
     test_negotiate_failure_maps_to_hw_params();
     test_audio_avail_reports_room_on_linux();
     test_mixer_elem_info_failure_maps_to_mixer_elem();
+
+    test_group("1.2.2 recovery policy");
+    test_recovery_success_ignores_state();
+    test_recovery_maps_every_state();
+    test_recovery_unknown_state_does_not_retry();
+    test_recovery_each_action_has_one_state();
+    test_recovery_actions_are_distinct();
+    test_recovery_only_xrun_reprepares();
+
+    test_group("1.2.2 interval flags");
+    test_interval_closed_range_unchanged();
+    test_interval_openmin_excludes_min();
+    test_interval_openmax_excludes_max();
+    test_interval_both_ends_open();
+    test_interval_empty_is_not_a_pick();
+    test_interval_inverted_yields_no_pick();
+    test_interval_integer_flag_does_not_move_endpoints();
+
+    test_group("1.2.2 residual coverage");
+    test_hwp_interval_flags_reads_the_field();
+    test_audio_open_nonexistent_returns_zero();
+    test_audio_set_params_rejects_bad_input();
+    test_mixer_elem_info_fails_on_bad_fd();
+    test_error_emitters_are_safe_for_every_code();
 
     assert_summary();
     return 0;

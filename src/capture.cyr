@@ -18,8 +18,17 @@ fn vani_record(d, buf, frames): i64 {
     var h = vani_audio_handle(d);
     var got = audio_read(h, buf, frames);
     if (got >= 0) { return vani_ok(got); }
+
+    # Same classify-then-act split as vani_play — see that function and
+    # docs/adr/0004-recovery-policy-seam.md. The policy is shared and
+    # direction-agnostic; only the error codes below differ.
     var st = audio_get_state(h);
-    if (st == SND_PCM_STATE_XRUN) {
+    var act = _vani_recovery_for(got, st);
+
+    if (act == VANI_RECOVERY_GONE) {
+        return vani_err_result(VANI_ERR_DISCONNECTED);
+    }
+    if (act == VANI_RECOVERY_REPREPARE) {
         vani_xrun_inc(d);
         var pr = audio_prepare(h);
         if (pr < 0) { return vani_err_result(VANI_ERR_PREPARE); }
@@ -27,14 +36,7 @@ fn vani_record(d, buf, frames): i64 {
         if (got >= 0) { return vani_ok(got); }
         return vani_err_result(VANI_ERR_OVERRUN);
     }
-    if (st == SND_PCM_STATE_DISCONNECTED) {
-        # Device is gone — no recovery is possible and retrying would
-        # spin. Surface the specific code rather than the generic one.
-        # VANI_ERR_DISCONNECTED existed as a public code since v0.2.0 but
-        # was produced by no path until 1.2.1.
-        return vani_err_result(VANI_ERR_DISCONNECTED);
-    }
-    if (st == SND_PCM_STATE_SUSPENDED) {
+    if (act == VANI_RECOVERY_RESUME) {
         var rr = audio_resume(h);
         if (rr < 0) {
             var pr = audio_prepare(h);
