@@ -2,7 +2,8 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest audit at
-`docs/audit/2026-07-19-v1.1.2-audit.md` (priors:
+`docs/audit/2026-08-20-v1.1.4-audit.md` (priors:
+`docs/audit/2026-07-19-v1.1.2-audit.md`,
 `docs/audit/2026-07-06-v1.0.0-audit.md`,
 `docs/audit/2026-05-01-v0.9.1-audit.md`,
 `docs/audit/2026-04-30-v0.9.0-audit.md`,
@@ -11,7 +12,76 @@ completed work — don't duplicate it here. Latest audit at
 
 ## Open — P1
 
-*None open.*
+**UAPI: `enum AlsaHwParam` interval indices are +2 off the kernel spec.**
+Filed by the 1.1.4 sweep (finding H-1,
+[`docs/audit/2026-08-20-v1.1.4-audit.md`](../audit/2026-08-20-v1.1.4-audit.md)).
+`src/alsa.cyr:156-169` numbers all 14 interval-group params two above
+`sound/asound.h` (`CHANNELS` 12 vs 10, `RATE` 13 vs 11, `FIRST_INTERVAL` 10 vs
+8, …). **No wire impact today** — every one of the 12 use sites computes
+`PARAM - FIRST_INTERVAL`, so the offset cancels, and `rmask` is written all-ones
+rather than `1 << PARAM`. But it violates the hard rule that kernel UAPI is the
+spec, and it becomes a live bug the moment anyone writes a selective `rmask` or
+decodes `cmask`. Deliberately **not** fixed in 1.1.4 to keep that patch's
+"emitted bytes moved only because the stdlib moved" proof intact.
+
+Land as a single change with the assertions that would have caught it:
+
+- [ ] Correct the 14 constants to UAPI values (`SAMPLE_BITS`=8 … `TICK_TIME`=19,
+      `FIRST_INTERVAL`=8, `LAST_INTERVAL`=19)
+- [ ] `test_hwparam_index_constants()` — all 17 members vs UAPI literals, plus
+      `LAST_INTERVAL - FIRST_INTERVAL + 1 == 12` and
+      `LAST_MASK - FIRST_MASK + 1 == 3` (the `ii<12` / `mi<3` loop bounds at
+      `src/alsa.cyr:221`/`:212`)
+- [ ] Replace the split size/type ioctl assertions with full 32-bit equality for
+      all 18 — strictly less code, and it catches nr-byte and direction-bit
+      drift that the current split assertions cannot (finding H-4)
+- [ ] `test_ctl_elem_list_field_offsets()` (0/4/8/12/16) and
+      `test_access_constants()` (0/1/3/4) — the two of the 45 unasserted enum
+      members with real consequence (finding H-3)
+- [ ] Fix the stale comments: `snd_pcm_status` 192 → 152 (`src/alsa.cyr:912`,
+      carried from the 1.1.2 audit) and `snd_ctl_elem_list` 280 → 80
+      (`src/alsa.cyr:302-303`) (finding L-1)
+- [ ] Re-run `programs/caps.cyr` on real hardware to confirm negotiated
+      channel/rate ranges are unchanged (needs a desktop seat session — this box
+      currently gets EACCES on `/dev/snd`)
+
+## Open — P2
+
+**Untrusted-input hardening (both pre-existing, byte-identical to 1.1.3).**
+Filed by the 1.1.4 sweep (findings L-3, L-4).
+
+- [ ] `vani_mixer_list_elements` (`src/mixer.cyr:317-329`) reads the element
+      `count` straight from the ELEM_LIST ioctl with no upper bound, then
+      allocates `count * 64`. Above ~33.5 M that exceeds `ALLOC_MAX`, `alloc`
+      returns 0, and `memset` writes from address 0. Requires a hostile or
+      broken driver, but CLAUDE.md's "do not trust external data (kernel ioctl
+      returns…) without validation" applies directly. Bound it and add a
+      regression assertion.
+- [ ] `vani_ring_new` (`src/buffer.cyr:47-48`) stores into `rb` without checking
+      `alloc`'s 0 sentinel, so total heap exhaustion writes to address 0.
+
+**CI does not gate the API surface.** `cyrius_api_surface --scope=project`
+reports 108 matching the snapshot exactly, but nothing runs it in CI — the
+v1.0.0 SemVer freeze is currently enforced by hand. Wire it into
+[`ci.yml`](../../.github/workflows/ci.yml).
+
+**Is a PE/Windows build a supported configuration?** cyrius 6.5.25+ made an
+unrouted literal syscall return −38 instead of emitting a raw `0F 05`, and
+6.5.x's `syscalls_windows.cyr` now defines `SYS_IOCTL = 16`. vani's 20 raw
+`syscall(SYS_IOCTL, …)` sites therefore now *compile* for PE and return −ENOSYS
+at runtime, where the build used to fail loudly. Fail-safe, but someone could
+read a clean Windows compile as a working audio path. Decide, and write it down
+in `docs/architecture/` (finding L-5).
+
+**Declined, recorded so it is not re-litigated:** adopting `io.cyr`'s `xopen` /
+`file_open` at the three sites cyrlint flags. All three are inside
+`#ifdef CYRIUS_TARGET_AGNOS` arms that never reach `sys_open`; the lint rule
+does not see the `#ifdef`. Adoption is a functional no-op on Linux and would
+push `dist/vani-core.deps` from 4 leaves to 6 (io pulls `syscalls` + `result`),
+against the core profile's whole purpose (finding L-6).
+
+
+### Closed
 
 The agnos-incorrect Linux-shaped `sys_open` in `vani_mixer_open`
 (`src/mixer.cyr`, filed 2026-07-08) was **fixed in 1.1.1**: an
@@ -21,6 +91,11 @@ surface on agnos — mirroring `audio_open_capture`'s agnos branch. The
 reachability question the filing flagged is resolved the same way: the
 mixer is a Linux-only path today, and the agnos branch is now explicit.
 See the 1.1.1 CHANGELOG entry.
+
+The last **untracked lint deferral** (`src/alsa.cyr`, a stale "filed as audit
+follow-up" sentence for the `xferi[16]`→`[24]` correction that 0.3.0 actually
+closed) was cleared at **1.1.4**, and CI's lint gate now fails on untracked
+deferrals as well as warnings.
 
 ## v0.3.0 / v0.9.0 / v0.9.1 — done
 

@@ -7,6 +7,188 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.4] — 2026-08-20
+
+### Changed — cyrius pin 6.5.5 → 6.5.31
+
+Twenty-six toolchain releases of catch-up. **Zero semantic source change** —
+every `src/*.cyr` diff in this release is whitespace or comment text, and
+`git diff -w` on both dist bundles reduces to the version stamp plus one
+8-line comment cross-reference, which is the proof.
+
+Resolved stdlib moved with the pin: **40 modules**, 24 of them changed, every
+one byte-identical to `~/.cyrius/versions/6.5.31/lib` after `rm -rf lib &&
+cyrius deps`. Bundled sub-libraries: **yukti 2.3.2 → 2.3.8**, **patra 1.12.12 →
+1.13.9**, **sakshi 2.4.7 → 2.4.11**.
+
+#### Binary-size attribution — a clean 2×2
+
+`(cycc version) × (pinned stdlib snapshot)`, each axis varied independently via
+hybrid `CYRIUS_HOME` prefixes, `CYRIUS_DCE=1`, x86_64:
+
+| | stdlib 6.5.5 | stdlib 6.5.31 | Δ stdlib |
+|---|---|---|---|
+| **cycc 6.5.5** | 472,712 B | 502,720 B | **+30,008** |
+| **cycc 6.5.31** | 476,808 B | 506,816 B | **+30,008** |
+| **Δ cycc** | **+4,096** | **+4,096** | |
+
+Perfectly orthogonal and exactly additive: the stdlib snapshot contributes
+**+30,008 B** regardless of which compiler emits it, and the compiler
+contributes **+4,096 B** regardless of which stdlib it is fed. Nominal 1.1.3
+(both 6.5.5) → nominal 1.1.4 (both 6.5.31) is **+34,104 B**.
+
+Unlike the 1.1.2 bump — where cycc version had *zero* effect on vani's emitted
+bytes — this window does move them, but barely: the R+E LOAD segment grows
+`0x64d00 → 0x65ce0` (**+4,064 B** of real text/rodata, rounded up to one 4 KiB
+page in the file), and the RW segment is byte-identical (`0x15a60`/`0x16a60`).
+Reachable-function count is unchanged at 1307; this is codegen density, not new
+code.
+
+**Where the +30,008 B actually went**, attributed by rebuilding one scratch tree
+against four `CYRIUS_HOME`s that differ only in which sub-library is rolled back:
+
+| Rolled back | `vani_smoke` | attributable |
+|---|---|---|
+| (none — all new) | 506,816 B | — |
+| patra 1.13.9 → 1.12.12 | 494,464 B | **+12,352** |
+| yukti 2.3.8 → 2.3.2 | 501,896 B | **+4,920** |
+| sakshi 2.4.11 → 2.4.7 | 506,736 B | **+80** |
+| all three | 489,440 B | +17,376 |
+
+So **patra alone is 41 % of the growth — and it is 100 % dead code for vani**,
+reachable only through yukti's `device_db`, which vani never enters. DCE NOPs
+the bodies but its rodata survives (`strings` finds `PTRAH`, `patra: invalid
+magic` in the binary). The residual ~+12,632 B is core stdlib: `alloc`
+29,100 → 42,247 B, `freelist` 5,967 → 26,448 B, `io` 24,707 → 32,082 B, `fs`
+13,370 → 25,553 B on disk. **No vani function moved dead → live.**
+
+Other targets: aarch64 677,336 → 744,232 B; agnos 451,584 → 489,624 B. Both
+build clean, agnos with **zero warnings — at both ends of the bump**. That last
+point corrects an expectation carried from the 1.1.2 audit: the 15 stdlib
+`lib/yukti.cyr` warnings it documented were already resolved upstream *before*
+6.5.5, so 1.1.4 neither introduced nor fixed them.
+
+#### `cyrius build` reads the pinned snapshot, not vendored `lib/`
+
+First established by the 1.1.2 audit (canary function in `lib/alloc.cyr`) and
+re-confirmed here by a harsher test — appending a deliberate **syntax error** to
+`./lib/tagged.cyr` and rebuilding **succeeded**, byte-identical. `include
+"lib/…"` resolves from `$CYRIUS_HOME/versions/<pin>/lib`; the vendored `./lib/`
+is consulted only to emit the `./lib/ shadows version-pinned …` warning. So
+`lib/` is editor/IDE support, and **the `cyrius = "X.Y.Z"` pin is the real
+supply chain** — which is also why the 2×2 above had to vary the pin rather
+than swap `lib/` contents. Promoted out of the audit doc into
+[`docs/development/state.md`](docs/development/state.md), since it lived only in
+an audit appendix and is load-bearing for anyone reasoning about vani's
+dependencies.
+
+#### `dist/*.deps` sidecars got more complete
+
+`dist/vani.deps` 15 → **21** leaves (`+freelist`, `+process`, `+patra`,
+`+atomic`, `+sync`, `+thread_local` — the yukti/patra transitive chain that was
+previously under-reported); `dist/vani-core.deps` 3 → **4** (`+syscalls`, which
+`src/alsa.cyr` plainly needs for `syscall(SYS_IOCTL, …)` and `sys_open`, and
+which 1.1.1's 15→3 tightening had over-trimmed). Consumers' `cyrius deps` reads
+these, so this is a real fix for downstreams that vendor the bundles.
+
+This also **closes 1.1.2 audit finding #4** (the cosmetic `undefined function`
+warnings dist-bundle consumers saw out of `lib/yukti.cyr`): with the expanded
+sidecar the default resolve path emits none, where `cyrius build --no-deps`
+still reproduces the old `fl_alloc` / `fl_free` / `exec_vec` / `exec_capture`
+set. The trade-off is that `patra` now appears in `dist/vani.deps`, so
+consumers resolving through it inherit patra's dead weight — noted in the audit
+as an upstream item (yukti's `device_db` would ideally be a separate optional
+fold).
+
+### Fixed
+
+- **CI format gate was silently inverted by the toolchain bump.** The step ran
+  `diff <(cyrius fmt "$f") "$f"`, which was correct through 1.1.3. Somewhere in
+  the 6.5.6–6.5.31 window `cyrius fmt <file>` changed to format **in place** and
+  print nothing, so the gate compared an empty stream against every file — a
+  guaranteed red, and on a writable checkout it silently rewrote sources (it
+  rewrote six of vani's during this release's investigation). Restored to
+  `cyrius fmt <file> --check`, which exits 0/1 and writes nothing. The bare
+  `cyrfmt --check` binary is **not** an equivalent substitute: it reported CLEAN
+  on the same six files `cyrius fmt --check` correctly flagged, so it is the
+  weaker check and CI must not use it.
+- **Formatter reflow applied** — the drift the repaired gate then found:
+  continuation lines of multi-line call arguments re-indent 4 → 6 spaces.
+  59 insertions / 59 deletions across `src/alsa.cyr`, `src/device.cyr`,
+  `src/mixer.cyr`, `programs/latency_test.cyr`, `tests/tcyr/vani.tcyr`,
+  `tests/bcyr/vani.bcyr`. Whitespace only, idempotent on a second pass, and the
+  emitted binary is byte-identical across it.
+- **Last untracked lint deferral closed** (`src/alsa.cyr`). cyrlint flags a
+  TODO/follow-up comment carrying no cross-reference; vani's one hit was a stale
+  sentence claiming the `xferi[16]` → `xferi[24]` correction was "filed as audit
+  follow-up for the next P(-1) sweep". That sweep ran and closed it at **0.3.0**.
+  The comment now cross-references `docs/audit/2026-04-30-audit.md` and the
+  0.3.0 entry. This is cleanup, not toolchain-forced — cyrlint's output on
+  vani's sources is **byte-identical between 6.5.5 and 6.5.31** (2 `sys_open`
+  notes, 1 deferral, 0 warnings under both), so the bump adds no new lint
+  surface. CI's lint gate now fails on untracked deferrals as well as warnings,
+  since cyrlint itself exits 0 on them.
+
+### Verified
+
+Full sweep at [`docs/audit/2026-08-20-v1.1.4-audit.md`](docs/audit/2026-08-20-v1.1.4-audit.md)
+— this also **closes the audit gap 1.1.3 left** (it shipped without one), so the
+sweep covers the combined `6.4.67 → 6.5.31` distance.
+
+- **ALSA UAPI re-pinned from scratch** against kernel `7.1.8-arch1-3` with a
+  generated C probe, plus a cross-arch leg re-running the same pins as
+  `_Static_assert`s under `clang --target=aarch64-linux-gnu` and
+  `riscv64-linux-gnu` (negative control verified). **18/18 ioctl numbers, 11/11
+  struct sizes, 40/40 field offsets clean.** One divergence found —
+  `enum AlsaHwParam` numbers the 14 interval-group params **+2 above the UAPI**
+  (`CHANNELS` 12 vs 10, `RATE` 13 vs 11). It has **no wire impact**: all 12 use
+  sites compute `PARAM - FIRST_INTERVAL`, so the offset cancels, and `rmask` is
+  written all-ones rather than `1 << PARAM`. Deliberately **not fixed here** —
+  a UAPI constant edit would forfeit this patch's "bytes moved only because the
+  stdlib moved" proof, and CLAUDE.md says one change at a time. Filed **P1** in
+  the roadmap with the four regression assertions that would have caught it.
+- **CVE sweep, 2026-07-19 → 2026-08-20, host kernel 7.1.8.** 19 new in-window
+  Linux kernel audio CVEs; **zero triggerable through vani's ioctl surface.**
+  Closest approach is **CVE-2026-74498** (`sound/usb/endpoint.c`, USB-audio
+  `fill_max` DMA overrun) which runs directly beneath vani's `HW_PARAMS` call —
+  vani is the victim with no mitigation available, since `fill_max` lives below
+  the ALSA UAPI boundary. Fixed in 7.1.8; **the host is exactly at 7.1.8, so
+  verified-patched with zero margin.** Downstreams below 7.1.8 on the 7.1 line
+  are exposed when opening USB audio. Also noted: **CVE-2026-64490** makes
+  virtio-snd a new attack-surface class for the mixer path, which prior sweeps
+  (physical cards only) did not consider. cyrius itself has zero public
+  advisories.
+- Gates re-run from a clean tree (`rm -rf build lib && cyrius deps`) under a
+  hybrid `CYRIUS_HOME` pinned to genuine **6.5.31** binaries — necessary because
+  a 6.5.32 toolchain landed on the dev box mid-release and repointed
+  `~/.cyrius/{bin,lib,current}`. `cyrius test` **259/259**, `cyrius lint`
+  **0 warnings / 0 untracked deferrals** across all 20 gated files, `cyrius fmt
+  --check` 0 drift, `cyrius vet` `1 deps, 0 untrusted, 0 missing`, distlib drift
+  limited to the version stamps + the whitespace reflow, `CYRIUS_DCE=1` builds
+  clean on x86_64 / aarch64 (valid stripped ARM ELF) / agnos, security pattern
+  scan clean, and all 8 real-HW programs build. The clean-room `vani_smoke` is
+  **byte-identical** to the working-tree build. API surface holds at **108**
+  public fns, matching `docs/api-surface.snapshot` exactly — no drift, as a
+  patch requires; core holds at 24.
+- Incidentally A/B'd along the way: cycc **6.5.31 and 6.5.32 emit a
+  byte-identical `vani_smoke`**, so the accidental 6.5.32 exposure changed
+  nothing — but every number reported here was re-measured under 6.5.31.
+- **Real HW, dev box (HDA Generic + HDMI + ACP):** `vani_devices` under yukti
+  2.3.8 enumerates all **8 PCM endpoints** across cards 0/1/2 and matches the
+  documented baseline **exactly** — same cards, devices, directions, drivers,
+  names and `hw_id`s. The yukti 2.3.2 → 2.3.8 bump does not disturb discovery.
+  PCM open returned the documented non-session EACCES (the `/dev/snd/*` nodes
+  are `root:audio` and the logind ACL grants `sddm`, not this shell) and all 8
+  programs degraded closed with no crash. All 9 programs build with 0 warnings.
+  No audible tone was pushed at 1.1.4 for that same access reason; the last
+  audible confirmation remains cyrius-doom 0.30.5 (2026-06-29).
+- Benches within run-to-run noise of the `31d5f08` (1.1.2) row across three runs
+  on the pinned toolchain: `ring_200ms_playback` 83.9 / 85.9 / 85.6 µs (prior
+  row 84.1 µs), `ring_write_64b` 160-168 ns (167), `ring_read_64b` 316-327 ns
+  (328), `hwp_init_any` 934-956 ns (991). Measured on a machine under heavy
+  concurrent load, and nothing in this bump touches a benched code path. New
+  `bench-history.csv` row appended.
+
 ## [1.1.3] - 2026-08-02
 
 ### Changed — cyrius pin 6.4.67 -> 6.5.5

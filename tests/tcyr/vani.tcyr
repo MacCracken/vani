@@ -225,7 +225,7 @@ fn test_open_yukti_null_descriptor() {
     assert_eq(is_ok(res), 0, "null desc returns Err");
     var e = payload(res);
     assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
-    "null desc → ERR_YUKTI_DESCRIPTOR");
+      "null desc → ERR_YUKTI_DESCRIPTOR");
     return 0;
 }
 
@@ -243,7 +243,7 @@ fn test_open_yukti_descriptor_accessor_projection() {
     assert_eq(yukti_audio_card(d),      3, "card at AI_CARD=0");
     assert_eq(yukti_audio_device(d),    7, "device at AI_DEVICE=8");
     assert_eq(yukti_audio_direction(d), YUKTI_AUDIO_CAPTURE,
-    "direction at AI_DIRECTION=24");
+      "direction at AI_DIRECTION=24");
     return 0;
 }
 
@@ -261,7 +261,7 @@ fn test_open_yukti_unknown_direction() {
     assert_eq(is_ok(res), 0, "invalid direction returns Err");
     var e = payload(res);
     assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
-    "invalid direction → ERR_YUKTI_DESCRIPTOR");
+      "invalid direction → ERR_YUKTI_DESCRIPTOR");
     return 0;
 }
 
@@ -496,7 +496,7 @@ fn test_ctl_elem_id_init_truncates_long_name() {
     var eid = alloc(CTL_ELEM_ID_SIZE);
     # 60-char name, deliberately exceeds the 44-byte field.
     _ctl_elem_id_init(eid, SNDRV_CTL_ELEM_IFACE_MIXER,
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
     # Byte at offset NAME_OFF + 43 must be 0 (null terminator).
     assert_eq(load8(eid + CTL_ELEM_ID_NAME_OFF + 43), 0, "null at +43");
     # Index field at +60 must still be zero (not overwritten).
@@ -787,8 +787,8 @@ fn test_negotiate_quality_preference() {
     # _hwp_mask_set_value clears first then sets bit, so we re-set the others manually.
     var slot0 = hwp + moff;
     store32(slot0, load32(slot0)
-    | (1 << SND_PCM_FORMAT_S16_LE)
-    | (1 << SND_PCM_FORMAT_S8));
+      | (1 << SND_PCM_FORMAT_S16_LE)
+      | (1 << SND_PCM_FORMAT_S8));
     # FLOAT_LE not in mask — quality walk picks S32_LE first.
     var picked = _negotiate_format_pick(hwp, SND_PCM_FORMAT_FLOAT_LE);
     assert_eq(picked, SND_PCM_FORMAT_S32_LE, "quality picks S32 over S16/S8");
