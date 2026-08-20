@@ -80,15 +80,28 @@ compose to size the ring at a target latency for a given format.
 ALSA reports a short / starved write as a negative return; the PCM
 state transitions to `SND_PCM_STATE_XRUN`. vani's recovery policy:
 
-| State | Action |
-|-------|--------|
-| XRUN | `audio_prepare` → retry the same write/read once. Increment xrun_count. |
-| SUSPENDED | Surface as `VANI_ERR_SUSPENDED` — resume needs explicit consent. |
-| anything else | Surface as `VANI_ERR_WRITE` / `VANI_ERR_READ`. |
+The classification is a pure function, `_vani_recovery_for(xfer_result,
+state)` in `src/error.cyr`, so it can be tested without a device — see
+[ADR 0004](../adr/0004-recovery-policy-seam.md). Both transfer paths
+classify through it, then act:
 
-The retry count is fixed at 1: if the second write also fails, we
-return `VANI_ERR_UNDERRUN` so the caller decides whether to drop
-samples or back off.
+| State | Action | Action constant |
+|-------|--------|-----------------|
+| XRUN | `audio_prepare` → retry once. Increment xrun_count. | `VANI_RECOVERY_REPREPARE` |
+| SUSPENDED | `audio_resume`; if the kernel lacks it, `audio_prepare`. Then retry once. | `VANI_RECOVERY_RESUME` |
+| DISCONNECTED | `VANI_ERR_DISCONNECTED`, **no retry** — the device is gone. | `VANI_RECOVERY_GONE` |
+| anything else, or a failed STATUS ioctl | `VANI_ERR_WRITE` / `VANI_ERR_READ`. | `VANI_RECOVERY_FAIL` |
+
+The retry count is fixed at 1: if the second transfer also fails, vani
+returns `VANI_ERR_UNDERRUN` / `VANI_ERR_OVERRUN` so the caller decides
+whether to drop samples or back off.
+
+Two of these rows were wrong for several releases and the errors were
+instructive. SUSPENDED was documented as "surface it, resume needs
+explicit consent" long after the code had started resuming. DISCONNECTED
+had no row at all because `SND_PCM_STATE_DISCONNECTED` was missing from
+`AlsaPcmState` — so an unplugged device fell into the XRUN-adjacent
+generic branch and was treated as *recoverable*. Both fixed at 1.2.1.
 
 ## Mixer
 
@@ -96,10 +109,23 @@ The control device is a separate fd from the PCM stream:
 `/dev/snd/controlC{N}`. Volume / mute / source-select are exposed
 as numeric "elements" via `SNDRV_CTL_IOCTL_ELEM_*`.
 
-The element ID descriptor and the value union are large structs
-(200+ bytes); v0.1.0 ships the open/close lifecycle and ioctl
-number table, with the per-element struct packing landing in v0.3.0
-once the wire layout is locked in tests against real hardware.
+The element ID descriptor and the value union are large structs —
+`snd_ctl_elem_id` 64 B, `snd_ctl_elem_info` 272 B, `snd_ctl_elem_value`
+1224 B, `snd_ctl_elem_list` 80 B, all pinned by tests against the UAPI
+headers. Volume and mute read/write shipped at 0.3.0.
+
+Two properties are load-bearing and easy to get wrong:
+
+- **Every value entry point type-gates first.** `ELEM_READ` and
+  `ELEM_WRITE` have no kernel-side type check, so reading an INTEGER
+  element as BOOLEAN returns a confident, wrong answer. All four
+  accessors issue `ELEM_INFO` and reject the wrong type; `get_mute` was
+  the one that did not, until 1.2.0.
+- **The element count is bounded before use.** `count` arrives from the
+  kernel and drives a `store64` loop into a 1224-byte *stack* buffer.
+  It is clamped to the UAPI's `integer.value[128]` extent, and the
+  two-pass `ELEM_LIST` clamps the second pass's `used` to what the first
+  pass actually allocated — the set can change between the two ioctls.
 
 ## yukti integration
 
@@ -107,15 +133,65 @@ once the wire layout is locked in tests against real hardware.
 yukti: "card 0 has PCM playback at /dev/snd/pcmC0D0p,
         supports 44100/48000 Hz, 16/24 bit"
    ↓
-vani_open_yukti(desc, VANI_PLAYBACK)
+vani_open_yukti(desc)
    ↓
-vani: open device, vani_configure to negotiated format
+vani: open device, vani_configure to the negotiated format
    ↓
-shravan: decode FLAC → PCM samples
+(a decoder or synth produces PCM frames)
    ↓
 vani_play: write PCM frames
    ↓
 speakers: sound
 ```
 
+`vani_open_yukti` takes the descriptor alone — direction comes from the
+descriptor, not a second argument. It was `(desc, direction)` before
+0.3.0; that signature appears in older docs and is wrong.
+
 vani never scans for hardware. yukti finds it. vani uses it.
+
+
+## Distribution profiles
+
+Two bundles come out of `cyrius distlib`, both committed and both
+drift-gated in CI (bundles *and* their `.deps` sidecars):
+
+| Profile | File | Contents | Symbols |
+|---------|------|----------|---------|
+| full | `dist/vani.cyr` | all eight modules — the whole `vani_*` surface | 109 |
+| core | `dist/vani-core.cyr` | `src/alsa.cyr` alone — the raw `audio_*` PCM shim | 25 |
+
+The core profile exists because `src/alsa.cyr` is **self-contained by
+construction**: zero cross-module references in its source. That is a
+property to preserve, not an accident — adding a call from `alsa.cyr`
+into any sibling module silently breaks the single-module bundle.
+
+Core omits the `vani_*` device wrapper, ring buffer, capture, mixer,
+typed errors and yukti integration. It suits consumers that need only
+"open / set_params / write / drain / close" and do not want to pay the
+full bundle's parse and codegen cost. Originally driven by the
+cyrius-doom proposal at `cyrius-doom/docs/proposals/vani-audio-core-profile.md`.
+
+The `.deps` sidecars record the stdlib leaves each bundle needs; a
+consumer's `cyrius deps` reads them. A stale sidecar breaks downstream
+builds while both `.cyr` files look fine, which is why the drift gate
+covers them.
+
+## The pin is the supply chain
+
+`cyrius build` resolves `include "lib/…"` from
+`$CYRIUS_HOME/versions/<pin>/lib` — the version-pinned toolchain
+snapshot — **not** from the repo's `./lib/`. The vendored `./lib/` is
+editor and IDE support, and the source of the `./lib/ shadows
+version-pinned …` warning; nothing else.
+
+Established twice, by experiment: the 1.1.2 audit planted a canary
+function in `lib/alloc.cyr` and it never appeared in the binary; the
+1.1.4 sweep appended a deliberate **syntax error** to `lib/tagged.cyr`
+and the build succeeded, byte-identical.
+
+Two consequences worth internalising:
+
+- Editing `lib/*.cyr` to test a hypothesis does nothing. Change the pin.
+- Any A/B that swaps `./lib/` contents measures nothing. Vary
+  `cyrius = "X.Y.Z"` in `cyrius.cyml` instead.

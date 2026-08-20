@@ -15,17 +15,9 @@ completed work — don't duplicate it here. Latest audit at
 
 ## Open — P1
 
-*None open.* The 1.1.4 sweep's P1 — `enum AlsaHwParam` numbering +2 above the
-kernel UAPI — was **fixed at 1.2.0**, together with every assertion listed
-alongside it (all 19 members pinned against UAPI literals, group-extent
-invariants, resolved interval slots, full 32-bit equality for all 18 ioctls,
-`snd_ctl_elem_list` field offsets, `AlsaAccess`). Verified with a negative
-control: reintroducing the +2 offset fails 14 assertions.
+*None.*
 
 ## Open — P2
-
-Everything the 1.2.0 P(-1) sweep filed is now closed (1.2.1 took the code-level
-items, 1.2.2 the structural ones). What follows is what 1.2.2 itself leaves.
 
 - [ ] **The prepare→retry sequence is still untested.** 1.2.2 made the recovery
       *decision* a pure function and covered it exhaustively; nothing proves the
@@ -41,17 +33,14 @@ items, 1.2.2 the structural ones). What follows is what 1.2.2 itself leaves.
       format together, so a combination whose parts are individually legal can
       still be rejected by `HW_PARAMS`. Needs a second ioctl round-trip, which
       cannot be verified without hardware — deliberately not added blind.
-- [ ] **No real-hardware verification anywhere in the 1.2.x line.** `/dev/snd` is
-      EACCES for the shell these releases were built in (the logind ACL grants
-      `sddm`). Enumeration works under yukti 2.3.8 and every program degrades
-      closed, but **nothing has been played**. The last audible confirmation is
-      cyrius-doom 0.30.5 (2026-06-29). Several defects fixed across 1.2.0-1.2.2 —
-      the S24_LE frame stride, the format that never reached the kernel, the
-      ring-consume ordering — sit on paths only real playback exercises. Run the
-      eight real-HW programs plus `./build/vani_tone` from a desktop seat session.
+- [ ] **No real-hardware verification anywhere in the 1.2.x line.** See
+      [Hardware coverage](#hardware-coverage-hw-gated) — this is the largest
+      open gap in the project.
 
-**Declined, recorded so they are not re-litigated** (all assessed in the 1.2.0
-sweep and argued against on the merits):
+## Declined
+
+Recorded so they are not re-litigated. All were assessed during the 1.2.0
+P(-1) sweep and argued against on the merits:
 
 - Factoring the 17 agnos `#ifdef` seams, the four `val[1224]` mixer preambles,
   or the EPIPE retry blocks in playback/capture. Each was examined; none
@@ -66,55 +55,14 @@ sweep and argued against on the merits):
   field in the failure message ("HW_PARAMS=608 (got 352…)"), which the
   full-equality assertions cannot.
 
-### Closed
+## Completed work
 
-**1.2.0 (P(-1) sweep)** closed: the `AlsaHwParam` P1 and all its assertions; the
-`snd_pcm_status` 192→152 item the 1.1.2 audit filed for 1.2.0; the api-surface CI
-gate; the untracked-lint-deferral gate; six duplicate `_puti` copies; the tree's
-one `break`-in-`var`-loop; the eleven stale "cyrius 5.8.0 fold-in is future work"
-claims (it had already completed); and CLAUDE.md's unrunnable closeout step 3.
+Completed work is **not** listed here — see [`CHANGELOG.md`](../../CHANGELOG.md),
+which is the authoritative record. As of 1.2.2 nothing filed by the 1.2.0
+P(-1) sweep, the 1.1.2 hardening backlog, or the v1.0.0 freeze criteria
+remains open; the cyrius stdlib fold-in is complete.
 
-
-The agnos-incorrect Linux-shaped `sys_open` in `vani_mixer_open`
-(`src/mixer.cyr`, filed 2026-07-08) was **fixed in 1.1.1**: an
-`#ifdef CYRIUS_TARGET_AGNOS` branch that fails closed
-(`VANI_ERR_MIXER_OPEN`) — there is no `/dev/snd/controlC{N}` control
-surface on agnos — mirroring `audio_open_capture`'s agnos branch. The
-reachability question the filing flagged is resolved the same way: the
-mixer is a Linux-only path today, and the agnos branch is now explicit.
-See the 1.1.1 CHANGELOG entry.
-
-The last **untracked lint deferral** (`src/alsa.cyr`, a stale "filed as audit
-follow-up" sentence for the `xferi[16]`→`[24]` correction that 0.3.0 actually
-closed) was cleared at **1.1.4**, and CI's lint gate now fails on untracked
-deferrals as well as warnings.
-
-## v0.3.0 / v0.9.0 / v0.9.1 — done
-
-- **0.3.0** (released 2026-04-30): yukti integration —
-  `vani_open_yukti(desc)` thin adapter, real-HW DEVICES PASS on
-  dev box.
-- **0.9.0** (released 2026-04-30, pre-1.0 RC): aarch64 cross-build
-  unblocked (73-site syscall migration to stdlib wrappers; patra
-  pinned at 1.9.2 via git override); CI cross-build gate
-  re-enabled; release ships `vani-X.Y.Z-smoke-aarch64-linux`;
-  API surface baseline captured at `docs/api-surface.snapshot`
-  (106 public symbols).
-- **0.9.1** (released 2026-05-01): `[lib.core]` profile. Single
-  `cyrius distlib core` → `dist/vani-core.cyr` (29 KB / 22
-  symbols; 62% smaller than full). Driven by cyrius-doom's
-  6-of-106-symbols usage report — proposal collapsed from a
-  three-cut series (0.9.1/0.9.2/0.9.3) to a single cut because
-  `src/alsa.cyr` is fully self-contained (proposal's open
-  question #4). Second baseline at
-  `docs/api-surface.core.snapshot`. Both bundles now drift-gated
-  in CI; release ships `vani-X.Y.Z.cyr` and `vani-X.Y.Z-core.cyr`.
-
-The cyrius 5.8.0 fold-in pin (cyrius/cyrius.cyml `[deps.vani]`)
-points at whatever vani tag is current at cut time — handled on
-the cyrius side, not here.
-
-## Optional pre-1.0 work (not blocking 1.0)
+## Unscheduled — nice to have
 
 - [ ] **XRUN-rate benchmark under sustained load** — a stress
       harness that runs continuous playback for minutes,
@@ -134,46 +82,20 @@ the cyrius side, not here.
       `sys_clock_gettime` to the cyrius stdlib. Lands when an
       aarch64 dev host with real audio HW becomes available.
 
-## Hardening backlog filed by the 1.1.2 audit — **6 of 7 DONE**
+## Hardware coverage (HW-gated)
 
-All seven were confirmed pre-existing and byte-identical before and after the
-1.1.2 toolchain bump. Detail in
-[`docs/audit/2026-07-19-v1.1.2-audit.md`](../audit/2026-07-19-v1.1.2-audit.md).
+**This is the largest gap in the project**, and it has grown rather than
+shrunk: the whole 1.2.x line — thirteen real defects across three releases —
+was found and fixed by reading, probing and mutation testing, and **none of
+it has been heard**. `/dev/snd` is EACCES for the shell those releases were
+built in (the logind ACL grants `sddm`), so nothing was played.
 
-- [x] **Guard `alloc()` returns in `vani_ring_new`** — done **1.2.0**. Both the
-      40-byte header and the payload are checked, header first.
-- [x] **Clamp the kernel-supplied ELEM_INFO `count` in the mixer** — done
-      **1.2.0**. Both setters bound `count` against the UAPI extent
-      (`integer.value[]` is 128 longs) and `set_mute` gained the `count == 0`
-      guard it never had. Heap-side, `vani_mixer_list_elements` bounds `count`
-      by `VANI_MIXER_MAX_ELEMS` and **clamps `used` to the allocation** — the
-      1.1.2 filing asked for `used <= count` and that is what shipped. Note the
-      filing's reassurance that "USB-audio is capped at `MAX_CHANNELS = 16`
-      upstream" was not relied on: vani now bounds it regardless of what the
-      driver does.
-- [x] **Fix the stale `snd_pcm_status` size comment** — done **1.2.0**, and
-      taken further than filed: the comment is corrected, the buffer is shrunk
-      192 → 152, a new `AlsaPcmStatusLayout` enum pins size and offsets, the
-      `load64` on the u32 `state` field is narrowed to `load32`, and an
-      assertion ties the ioctl's size bits to the constant.
-- [x] **Add `freelist` / `process` / `patra` to `dist/vani.deps`** — done
-      **1.1.4**; the sidecar went 15 → 21 leaves and the cosmetic
-      `undefined function` warnings are gone on the default resolve path.
-- [x] **Upstream the stdlib-yukti agnos warnings** — resolved upstream. vani's
-      `--agnos` build emits **zero** warnings, and did so at both ends of the
-      1.1.4 bump, so they were fixed before cyrius 6.5.5.
-- [x] **Optional lint hardening** — done **1.1.4**. CI's lint gate now fails on
-      `N untracked deferrals` as well as `warn ` lines, and vani's one
-      untracked deferral was closed.
-- [ ] **Extend the distlib drift gate to the `.deps` sidecars**
-      (`.github/workflows/ci.yml`) — still open, still low value. It covers only
-      the two `.cyr` bundles. Effectively self-healing today: every release
-      bumps the `# Version:` stamp inside both `.cyr` files, which forces a
-      `cyrius distlib` run that rewrites the sidecars in the same operation.
+Before trusting 1.2.x on hardware, run the eight real-HW programs plus
+`./build/vani_tone` from a desktop seat session. Several fixed defects — the
+S24_LE frame stride, the format that never reached the kernel, the
+ring-consume ordering — sit on paths only real playback exercises.
 
-## v0.5.x — hardware coverage (HW-gated)
-
-Need access to non-onboard audio to close out v0.2.0 #6 / #7:
+Beyond that, non-onboard hardware access is needed for:
 
 - [ ] **USB audio interface integration test** — `programs/probe.cyr`
       + `programs/play_tone.cyr` + `programs/throughput.cyr`
@@ -192,45 +114,6 @@ Need access to non-onboard audio to close out v0.2.0 #6 / #7:
       preset (5ms × 4 = 20ms) that gates on the device's
       reported minimum period.
 
-## v1.0.0 — Stable — **SHIPPED 2026-07-06**
-
-Cut with the **full `vani_*` surface frozen** under SemVer (106 symbols).
-Criteria closeout:
-
-| # | Item | Status at cut |
-|---|------|---------------|
-| 1 | Multi-hardware integration coverage (3+ targets) | **Accepted as HW-gated deferral.** Onboard analog (HDA / ALC897) verified + **audible** (doom). USB + HDMI never round-tripped — **no hardware access**, not a code gap: the same frozen code path drives them. Reclassified to post-1.0 hardware coverage (see v0.5.x); does **not** touch the frozen API. |
-| 2 | First downstream consumer landed: `cyrius-doom` audio upgrade | **Met — audible on real HW.** cyrius-doom 0.30.5 (tagged), core profile, S16/stereo/44100 (2026-06-29). |
-| 3 | Second downstream consumer | **Met — four consumers.** doom + polyomino 0.5.1 + bb 0.8.0 (core), plus **dhvani 2.1.2 (full surface)** and **mishran 0.4.1 (core sink, real-HW verified 2026-07-06)**. ⛔ **One piece of evidence RETRACTED 2026-08-03**: "two-proc agnos audio 2026-07-10" was also listed here and is a **FALSE GREEN** — it came off the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment (hook + smoke deleted), so **this criterion is NOT met by that evidence and never was**. The criterion still stands on its own: it asks for a second downstream consumer, and doom / polyomino / bb / dhvani / mishran's real-HW `pump_probe` each satisfy it independently of any agnos two-proc result. No release gate re-opens. See agnos `docs/development/planning/ipc.md` §9-§10. |
-| 4 | API surface captured as v1 baseline | **Met.** `docs/api-surface.snapshot` refrozen at 106 (arity-6 `audio_set_params_full` corrected from the 2-line-signature parse artifact); `api-surface` matches exactly. |
-| 5 | Public API frozen; SemVer guarantees | **Done — full-surface freeze.** dhvani validates the full ring/capture/playback/device/format surface live, so the earlier split-freeze recommendation is superseded. Two corners (`vani_open_yukti`, `src/mixer.cyr`) are frozen but consumer-unvalidated (internally test-covered) — documented, not held back. |
-| 6 | Migration-guide entry for pre-1.0 breaking changes | **Done — no consumer-facing breaks.** The one pre-1.0 breaking change (`vani_open_yukti` `(desc,direction)`→`(desc)` at 0.3.0) touched a no-consumer stub. Aggregated in the 1.0.0 CHANGELOG **Breaking** section. Upgrade is drop-in. |
-
-Post-1.0 forward work: USB + HDMI real-HW round-trip (HW-gated, above),
-the yukti-adapter / mixer-control live-consumer validation, and the
-optional stress-bench / portable-clock items.
-
-## Cyrius stdlib fold-in (cross-cut) — **DONE**
-
-Verified complete 2026-08-20 (1.2.0 P(-1) sweep): `cyrius/lib/audio.cyr`
-is gone from the toolchain snapshot and cyrius bundles vani as
-`lib/vani.cyr`. Nothing further is owed on either side. The section
-below is the original forward-looking text, retained for the record.
-
-
-Cyrius's roadmap §v5.8.0 commits to bundling vani as a sibling
-distlib alongside mabda / sankoch / sigil / yukti / sandhi.
-Vani-side prereqs are met (dist bundle reproducible, audit on
-record, real-HW probe + throughput PASS). The cyrius-side work
-(add `[deps.vani]` to `cyrius/cyrius.cyml`, delete
-`cyrius/lib/audio.cyr`, refresh stdlib reference) lives in the
-cyrius repo, not here. Vani waits for the cut and then has
-nothing further to do — the byte-stable `audio_*` API surface
-covers existing consumers transparently.
-
-See `docs/development/cyrius-stdlib-fold-in.md` for the full
-plan.
-
 ## P(-1) — Scaffold hardening (recurring)
 
 Runs before every minor cut. Items 5–7 (CVE research + audit
@@ -241,7 +124,7 @@ filing) are non-negotiable, even on a quiet release.
 | 0 | Read CHANGELOG, prior audit — know what's been touched | each P(-1) |
 | 1 | Cleanliness: `cyrius build programs/smoke.cyr` (0 warnings), `cyrius lint` (0 warnings), `cyrius fmt --check` diff-clean, `cyrius vet programs/smoke.cyr` clean | each P(-1) |
 | 2 | Test sweep: `cyrius test tests/tcyr/vani.tcyr` 100 % pass | each P(-1) |
-| 3 | `cyrius distlib` regenerates `dist/vani.cyr` diff-clean | each P(-1) |
+| 3 | `cyrius distlib` + `distlib core` regenerate both bundles **and both `.deps` sidecars** diff-clean | each P(-1) |
 | 4 | Benchmark baseline: `cyrius bench tests/bcyr/vani.bcyr` against `bench-history.csv` | each P(-1) |
 | 5 | **External CVE / 0-day research (web)** — see scope below | each P(-1) |
 | 6 | Internal deep review — gaps, correctness, FFI struct offsets, ioctl size encoding | each P(-1) |

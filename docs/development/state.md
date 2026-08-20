@@ -80,6 +80,14 @@
 
 ## Downstream Consumers
 
+> **Every vendoring consumer is behind.** doom carries vani 1.1.2,
+> mishran 1.1.0, polyomino and bb 0.9.9 — so none of them has the 1.2.x
+> fixes (S24_LE frame stride, the format that never reached the kernel,
+> the mixer count bounds, the null-handle guards). They vendor
+> `dist/vani-core.cyr` by copy, so picking those up is a deliberate
+> re-vendor on their side, not something a vani release pushes. All four
+> were verified to **rebuild clean** against 1.2.x during the sweep.
+>
 > v1.0.0 froze the **full `vani_*` surface** under SemVer. The full
 > ring/capture/playback/device/format surface is live-consumer
 > validated by **dhvani**. The two remaining consumer-unvalidated
@@ -90,12 +98,13 @@
 
 | Project | Status | Notes |
 |---------|--------|-------|
-| **dhvani** | **live — FULL `vani_*` surface** | Released **2.1.2**. `src/playback.cyr` bridges dhvani's f64 AudioBuffer ↔ vani's interleaved S16/S24/S32 PCM, exercising the full device path: `vani_open_playback` / `vani_open_capture`, `vani_ring_new` / `_write` / `_read`, `vani_play` / `vani_play_from_ring`, `vani_record` / `_record_to_ring`, `vani_configure`, `vani_format_new`, `vani_alsa_for`, `vani_start`, `vani_close`. References vani through functions only, so it DCE-prunes for vani-free consumers. **This is the consumer that unblocks the full-surface 1.0 freeze.** |
-| cyrius-doom | **live + audibly verified on real HW** — core profile | Released **0.30.5** (tagged). DOOM SFX route through `audio_write` in the 35 Hz `audio_tick` loop; audible at S16/stereo/44100 (2026-06-29). Deepest core exerciser: `audio_set_params_full` (period/buffer) + `audio_set_sw_params` + an `audio_open_capture` codec probe. Vendors `vendor/vani-core.cyr`. |
-| cyrius-polyomino | **live** — core profile | Released **0.5.1** (tagged). Vendors `vendor/vani-core.cyr`. Piece-lock / line-clear / level-up / top-out SFX → `audio_write`. 6 `audio_*` symbols. |
-| cyrius-bb | **live** — core profile | Released **0.8.0** (tagged). Vendors `vendor/vani-core.cyr`. Brick/wall/paddle + lost/over/fanfare SFX → `audio_write_bytes`. 6 `audio_*` symbols. |
-| **mishran** | **live — core sink (real-HW verified; two-proc agnos claim RETRACTED)** | **0.4.1** (released). The AGNOS software audio mixer / routing daemon (मिश्रण — "mixing"): fans many per-app S16 streams into one mixed writer to a vani sink. `MshRouter` opens/drives a real vani PCM device — `msh_router_open` (`audio_open_playback` → `audio_set_params` → `audio_prepare`), `msh_router_pump` → blocking `audio_write` (single-proc, `-EPIPE` recovery) **and** `msh_router_pump_nb` → `audio_avail`-gated `audio_write_nb` (multi-proc, cooperative), `msh_router_close` (drain + close). Vendors `vendor/vani-core.cyr` (provenance vani 1.1.0). `pump_probe` confirmed on real HW (2026-07-06). ⛔ **RETRACTED 2026-08-03** — this entry previously claimed a **two-proc tone** "proven non-silent on agnos QEMU (2026-07-10, RMS 2146)". **FALSE GREEN**: it required the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment for the loopback connect to complete at all; hook + smoke deleted. mishran's own CHANGELOG retracts the same claim at its `[0.4.1]` entry. TCP-on-loopback is retired as the local transport; re-proof belongs on the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9-§10. The real-HW sink verification is untouched. |
-| jalwa / agnoshi | not yet integrated | jalwa Rust→Cyrius port pending; agnoshi has no audio path. |
+| **dhvani** | **live — FULL `vani_*` surface** | Released **2.2.1**. `src/playback.cyr` bridges dhvani's f64 AudioBuffer ↔ vani's interleaved S16/S24/S32 PCM, exercising the full device path: `vani_open_playback` / `vani_open_capture`, `vani_ring_new` / `_write` / `_read`, `vani_play` / `vani_play_from_ring`, `vani_record` / `_record_to_ring`, `vani_configure`, `vani_format_new`, `vani_alsa_for`, `vani_start`, `vani_close`. References vani through functions only, so it DCE-prunes for vani-free consumers. **This is the consumer that unblocks the full-surface 1.0 freeze.** |
+| cyrius-doom | **live + audibly verified on real HW** — core profile | Released **0.35.4** (tagged; vendors vani **1.1.2**). DOOM SFX route through `audio_write` in the 35 Hz `audio_tick` loop; audible at S16/stereo/44100 (2026-06-29). Deepest core exerciser: `audio_set_params_full` (period/buffer) + `audio_set_sw_params` + an `audio_open_capture` codec probe. Vendors `vendor/vani-core.cyr`. |
+| cyrius-polyomino | **live** — core profile | Released **0.5.2** (tagged; vendors vani **0.9.9**). Piece-lock / line-clear / level-up / top-out SFX → `audio_write`. 6 `audio_*` symbols. |
+| cyrius-bb | **live** — core profile | Released **0.8.1** (tagged; vendors vani **0.9.9**). Brick/wall/paddle + lost/over/fanfare SFX → `audio_write_bytes`. 6 `audio_*` symbols. |
+| **mishran** | **live — core sink (real-HW verified; two-proc agnos claim RETRACTED)** | **0.5.4** (released; vendors vani **1.1.0**). The AGNOS software audio mixer / routing daemon (मिश्रण — "mixing"): fans many per-app S16 streams into one mixed writer to a vani sink. `MshRouter` opens/drives a real vani PCM device — `msh_router_open` (`audio_open_playback` → `audio_set_params` → `audio_prepare`), `msh_router_pump` → blocking `audio_write` (single-proc, `-EPIPE` recovery) **and** `msh_router_pump_nb` → `audio_avail`-gated `audio_write_nb` (multi-proc, cooperative), `msh_router_close` (drain + close). Vendors `vendor/vani-core.cyr` (provenance vani 1.1.0). `pump_probe` confirmed on real HW (2026-07-06). ⛔ **RETRACTED 2026-08-03** — this entry previously claimed a **two-proc tone** "proven non-silent on agnos QEMU (2026-07-10, RMS 2146)". **FALSE GREEN**: it required the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment for the loopback connect to complete at all; hook + smoke deleted. mishran's own CHANGELOG retracts the same claim at its `[0.4.1]` entry. TCP-on-loopback is retired as the local transport; re-proof belongs on the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9-§10. The real-HW sink verification is untouched. |
+| **jalwa** | **live — core `audio_*`, via dhvani** | Released **1.4.3**. Music player. Calls 7 core symbols (`audio_open_playback`, `audio_set_params`, `audio_prepare`, `audio_write`, `audio_drain`, `audio_drop`, `audio_close`) but declares no `[deps.vani]` — it reaches the shim through dhvani's bundle. Was listed here as "not yet integrated" through 1.2.2; corrected by the post-1.2.2 documentation sweep. |
+| shravan / naad / shruti / agnoshi | not integrated | **No code in any of them calls vani.** naad feeds dhvani, which owns the hardware path; shravan is codec-only; shruti and agnoshi have no audio path yet. README listed all four as consumers until the post-1.2.2 sweep — they are the intended pipeline, not current callers. |
 
 ## Shipped Releases
 

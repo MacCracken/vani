@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — documentation sweep
+
+Docs only; no source, no API, no behaviour change.
+
+- **`cyrius.cyml` is a manifest again, not a ledger.** Its comment blocks had
+  accumulated provenance and history — where `alsa.cyr` was lifted from, which
+  proposal drove the core profile, what would happen "once cyrius bundles it"
+  (it has, since 6.4.3). Trimmed to what each block *is* plus a pointer to
+  `docs/architecture/overview.md`, and the sections it now points at were
+  written to actually cover it: distribution profiles, and why the pin — not
+  `./lib/` — is the supply chain.
+
+- **`README.md` — the consumer table was wrong in both directions.** It listed
+  shravan, naad, shruti and agnoshi as consumers; **none of them calls vani**.
+  It omitted mishran, cyrius-polyomino and cyrius-bb, which do. jalwa is live
+  too, reaching the `audio_*` shim through dhvani's bundle rather than a direct
+  dependency. Now split into live consumers (with profile and what each
+  exercises) and the intended-but-not-yet-integrated pipeline.
+
+  Also corrected there: the layered model referenced `stdlib audio.cyr`, which
+  no longer exists, and `audio_set_params` where the format-preserving
+  `audio_set_params_fmt` is now the configure path; the pipeline diagram had
+  encode feeding vani, which contradicts PCM-only; and the hardware table read
+  as a support matrix when only onboard analog has ever been *run*.
+
+- **`docs/architecture/overview.md` — three stale sections.** The XRUN table
+  claimed SUSPENDED is surfaced because "resume needs explicit consent", long
+  after the code started resuming, and had no DISCONNECTED row at all. The
+  mixer section described per-element struct packing as future work "landing in
+  v0.3.0". `vani_open_yukti` was shown with its pre-0.3.0 two-argument
+  signature. All corrected, and the recovery table now names the
+  `VANI_RECOVERY_*` constants it maps to.
+
+- **`docs/development/roadmap.md` restructured.** Its own header says
+  "forward-looking only — don't duplicate CHANGELOG", and it had grown five
+  completed-work sections doing exactly that. Those collapse to a pointer;
+  ~290 lines → 179. Open items are now P1 / P2 / Hardware coverage /
+  Unscheduled / Declined, with the real-hardware gap stated as the largest open
+  item rather than buried in a v0.5.x heading.
+
+- **`docs/development/state.md`** — every consumer version was behind (dhvani
+  2.1.2→2.2.1, doom 0.30.5→0.35.4, polyomino 0.5.1→0.5.2, bb 0.8.0→0.8.1,
+  mishran 0.4.1→0.5.4), jalwa was still filed as "not yet integrated", and the
+  four non-consumers were not identified as such. Added an explicit note that
+  **every vendoring consumer is behind** — doom on 1.1.2, mishran on 1.1.0,
+  polyomino and bb on 0.9.9 — so none of them has the 1.2.x fixes, and picking
+  them up is a deliberate re-vendor on their side.
+
+- **P(-1) checklist item 3** now says both bundles *and* both `.deps` sidecars
+  must regenerate diff-clean, matching the gate 1.2.2 actually extended.
+
 ## [1.2.2] — 2026-08-20
 
 Closes the structural items the 1.2.0 P(-1) sweep left open — the ones that needed a
