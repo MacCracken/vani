@@ -8,7 +8,8 @@
 #
 # Recovery policy:
 #   underrun (XRUN)  → re-prepare, retry once. Increment xrun_count.
-#   suspended        → caller's problem (resume needs explicit consent)
+#   suspended        → try resume, fall back to prepare
+#   disconnected     → VANI_ERR_DISCONNECTED, no retry (device is gone)
 #   anything else    → propagate as VaniErr
 
 # ================================================================
@@ -33,6 +34,13 @@ fn vani_play(d, buf, frames): i64 {
         written = audio_write(h, buf, frames);
         if (written >= 0) { return vani_ok(written); }
         return vani_err_result(VANI_ERR_UNDERRUN);
+    }
+    if (st == SND_PCM_STATE_DISCONNECTED) {
+        # Device is gone — no recovery is possible and retrying would
+        # spin. Surface the specific code rather than the generic one.
+        # VANI_ERR_DISCONNECTED existed as a public code since v0.2.0 but
+        # was produced by no path until 1.2.1.
+        return vani_err_result(VANI_ERR_DISCONNECTED);
     }
     if (st == SND_PCM_STATE_SUSPENDED) {
         # Try resume; fall back to prepare if kernel doesn't support it.

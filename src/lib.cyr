@@ -3,7 +3,7 @@
 #
 # Provides: typed VaniErr error model, sample format helpers, ring
 # buffer for jitter resilience, VaniDevice handle (wraps stdlib
-# audio.cyr), playback / capture loops with XRUN recovery, mixer
+# src/alsa.cyr), playback / capture loops with XRUN recovery, mixer
 # control device.
 #
 # Stdlib includes live ONLY in this file — domain modules are flat,

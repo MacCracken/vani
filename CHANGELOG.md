@@ -7,6 +7,111 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-08-20
+
+The tail of the 1.2.0 P(-1) sweep. 1.2.0 shipped with seven code-level P2 items filed
+but not fixed; a follow-up pass over the tree found they were all cheap, so they are
+closed here rather than carried. Same sweep, same evidence — see
+[`docs/audit/2026-08-20-v1.2.0-audit.md`](docs/audit/2026-08-20-v1.2.0-audit.md) for how
+each was found, and the 1.2.1 addendum for what closing them changed.
+
+No API change (109 / 25, unchanged). Toolchain pin unchanged at 6.5.32.
+
+### Fixed
+
+- **Close was not idempotent** (LOW). `vani_close`, `audio_close` and
+  `vani_mixer_close` each closed the descriptor but left the slot populated, so a second
+  call closed a descriptor the kernel may already have recycled to a different owner. All
+  three now zero the slot and return early on a repeat call. No in-tree path
+  double-closes — this is hardening for out-of-tree consumers.
+
+- **`VANI_ERR_DISCONNECTED` was produced by nothing** (LOW). A public error code since
+  v0.2.0, but `SND_PCM_STATE_DISCONNECTED` (kernel state **8**) was absent from
+  `AlsaPcmState`, `vani_state_from_raw` clamped its range at 7, and no path constructed
+  the error. So an unplugged device was indistinguishable from a transient write failure
+  — and worse, **the retry logic treated it as recoverable** and would re-prepare a
+  device that is physically gone. `playback.cyr`'s own header comment claimed the
+  negative returns map to "XRUN, suspended, disconnected"; two of the three were true.
+
+  Now wired end to end: the state constant exists and is pinned against the kernel value,
+  `vani_state_from_raw` accepts [0,8], `vani_state_name` reports it, and both transfer
+  paths return `VANI_ERR_DISCONNECTED` without retrying.
+
+  **Behaviour change, deliberate**: raw state 8 previously mapped to
+  `VANI_STATE_UNKNOWN` and now maps to `VANI_STATE_DISCONNECTED`. A caller treating
+  UNKNOWN as "device is gone" now gets the specific state instead — which is what the
+  typed enum was for. Strictly speaking this is a semantic refinement on a symbol frozen
+  by ADR 0002; it is shipped in a patch because the previous behaviour was simply wrong
+  and no consumer can have depended on "unknown" for a state the kernel names.
+
+- **`_hwp_interval_set_exact` truncated silently** (LOW). It `store32`s its i64 argument
+  into the u32 `snd_interval.min/max` with no range check while the handle cached the
+  untruncated value — so an out-of-u32 rate or period left the device running at one rate
+  and reporting another. Now rejected rather than truncated.
+
+- **`_hwp_mask_set_value` did not enforce its documented `[0,255]` bound** (INFO), which
+  its read-side twin `_hwp_mask_has_bit` has always had. Unreachable from any in-tree
+  caller — all pass enum constants — but `vani_format_new` stores `alsa_fmt` unvalidated,
+  and a violating value was confirmed by probe to write outside the mask and, past
+  ~4576, outside the 608-byte struct entirely. Now enforced.
+
+- **`audio_set_sw_params` accepted `avail_min == 0`** (LOW), which the kernel rejects with
+  `-EINVAL`, surfacing as an opaque `VANI_ERR_SW_PARAMS`. Rejected up front so the
+  failure names its own cause. Both in-tree callers pass a period floored at 16, so
+  nothing changes for them.
+
+- **`boundary` was documented as an input to `audio_set_sw_params`.** It is a
+  kernel-owned **output** — `snd_pcm_sw_params()` computes it from `buffer_size` and
+  writes it back, ignoring whatever vani stored. Described as "`boundary =
+  AUDIO_FRAMES_MAX` (2^28 — plenty of wraparound headroom)" from v0.4.0 through 1.2.0.
+
+- **Four comments still referenced the deleted stdlib `audio.cyr`** (`src/lib.cyr`,
+  `src/format.cyr`, `src/device.cyr` ×2). Same rot as the eleven fold-in claims 1.2.0
+  corrected, and missed there because that pass grepped for "5.8.0" rather than for the
+  filename.
+
+### Verified
+
+- `cyrius test` **778/778** (was 775 at 1.2.0 — three new assertions covering the
+  widened state range and the `DISCONNECTED` constant). `cyrius lint` 0 warnings /
+  0 untracked deferrals, `cyrius fmt --check` clean, `cyrius vet` clean, distlib
+  regenerates clean, `CYRIUS_DCE=1` builds clean with zero warnings on x86_64 / aarch64 /
+  agnos, all 9 programs build, security pattern scan clean. Clean-room build is
+  byte-identical to the working tree.
+- **API surface unchanged at 109 / 25** — this release adds constants and guards, not
+  functions.
+- **Benchmarks: no measurable cost, established by a same-session A/B.** Two of the
+  guarded functions are directly benchmarked, so this needed checking. Comparing the
+  1.2.1 numbers against the *recorded* 1.2.0 row suggested a regression
+  (`hwp_interval_set_exact` 8 → 10 ns, `hwp_mask_set_value` 19 → 21, `hwp_init_any`
+  920 → ~1,020). **That comparison was invalid** — the two rows come from different
+  measurement sessions, and this machine is running ~8% slower than when the 1.2.0 row
+  was taken.
+
+  Rebuilding the tagged 1.2.0 tree and benching it in the *same* session gives the real
+  answer:
+
+  | Benchmark | 1.2.0 (same session) | 1.2.1 |
+  |---|---|---|
+  | `hwp_mask_set_value` | 21 ns | 21 ns — **no change** |
+  | `hwp_init_any` | 1,030 / 1,031 ns | 1,008-1,042 — **no change** |
+  | `hwp_interval_set_exact` | 9 ns | 10 ns — **+1 ns, at the resolution limit** |
+  | `ring_200ms_playback` | 90,262 / 91,384 ns | 91,557-91,639 — unchanged code |
+
+  So the guards cost nothing measurable beyond possibly 1 ns on one function, and that
+  one is configuration-time anyway: all three `_hwp_init_any` call sites
+  (`audio_set_params_fmt`, `audio_query_caps`, `audio_can_set_params`) run at device
+  setup, and `audio_write` issues no hw_params ioctl at all.
+
+  The `bench-history.csv` row for 1.2.1 is the raw measurement and is therefore ~8% above
+  the 1.2.0 row on unchanged code. Cross-row comparisons in that file are only valid
+  within a session.
+- Binary: x86_64 511,192 → **515,320 B**; aarch64 744,512 → **744,536**; agnos
+  494,000 → **494,032**.
+- `cyrius-doom`, `cyrius-polyomino`, `cyrius-bb` and `mishran` all rebuild clean against
+  the 1.2.1 `dist/vani-core.cyr`. `dhvani` is unchanged from 1.2.0 — still failing on its
+  own pre-existing `http_body`, and still vendoring vani 1.0.0.
+
 ## [1.2.0] — 2026-08-20
 
 Full **P(-1) scaffold-hardening sweep** — audit, refactor, hardening, repair. Cut as a

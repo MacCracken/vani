@@ -2,7 +2,9 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest audit at
-`docs/audit/2026-08-20-v1.1.4-audit.md` (priors:
+`docs/audit/2026-08-20-v1.2.1-audit.md` (priors:
+`docs/audit/2026-08-20-v1.2.0-audit.md`,
+`docs/audit/2026-08-20-v1.1.4-audit.md`,
 `docs/audit/2026-07-19-v1.1.2-audit.md`,
 `docs/audit/2026-07-06-v1.0.0-audit.md`,
 `docs/audit/2026-05-01-v0.9.1-audit.md`,
@@ -21,37 +23,43 @@ control: reintroducing the +2 offset fails 14 assertions.
 
 ## Open — P2
 
-Filed by the 1.2.0 P(-1) sweep. Everything here survived adversarial
-re-verification; severities are the post-verification ones.
+Filed by the 1.2.0 P(-1) sweep. The code-level items it filed were all closed
+within the same release; what remains is structural.
 
-- [ ] **Handle invalidation on close** (LOW, API/resource-lifetime).
-      `vani_close`, `audio_close` and `vani_mixer_close` leave the descriptor
-      slot populated after closing it, so the handle types are not
-      self-invalidating and close is not idempotent. No in-tree path double-closes;
-      this is hardening for out-of-tree consumers. Zero the fd slot and make a
-      second close a no-op.
-- [ ] **`VANI_ERR_DISCONNECTED` is a dead taxonomy entry** (LOW). No code path
-      constructs it, and `SND_PCM_STATE_DISCONNECTED` (8) is missing from
-      `AlsaPcmState`, so a device unplug is indistinguishable from a transient
-      write error. `src/playback.cyr:5` claims the negative returns map to
-      "XRUN, suspended, disconnected" — two of three are true.
-- [ ] **i64 → u32 truncation on the hw_params interval path** (LOW).
-      `_hwp_interval_set_exact` narrows its i64 argument into the u32
-      `snd_interval.min/max` with no range check, so an out-of-u32 rate or
-      period is silently truncated rather than rejected, while the handle
-      caches the untruncated value. Reject instead of truncating.
-- [ ] **`_hwp_mask_set_value` has no `[0,255]` bound** while its read-side twin
-      `_hwp_mask_has_bit` does (INFO/LOW). Unreachable today — `vani_format_new`
-      stores `alsa_fmt` unvalidated but every in-tree caller passes an enum —
-      confirmed by probe that a violating value writes outside the mask and,
-      past ~4576, outside the 608-byte struct. Enforce the documented precondition.
-- [ ] **Test coverage for the 22 frozen-but-uncalled public symbols.** ADR 0002
-      forbids removing them, so the actionable output is coverage, not deletion.
-      1.2.0 took reference coverage to 97%; these are the residue.
-- [ ] **A seam for XRUN / suspend / short-write paths.** Recovery, resume and
+- [ ] **Test coverage for the 22 frozen-but-uncalled public symbols.**
+      [ADR 0002](../adr/0002-freeze-full-vani-surface-at-1.0.md) forbids removing
+      them, so the actionable output is coverage, not deletion. 1.2.0 took
+      reference coverage to 97% (106/109 fns); these are the residue.
+- [ ] **A seam for the XRUN / suspend / short-write paths.** Recovery, resume and
       partial-transfer branches cannot be exercised without either real hardware
-      or an injectable ioctl seam. The 1.2.0 sweep concluded more assertions
-      cannot reach them — this needs a design decision, not more tests.
+      or an injectable ioctl seam. The 1.2.0 sweep concluded explicitly that more
+      assertions cannot reach them — this needs a design decision, not more tests.
+      The largest genuine coverage gap left in the tree.
+- [ ] **`vani_format_negotiate` clamps as if `snd_interval` were continuous** and
+      never re-refines with the chosen format, so it can return Ok for a format
+      that HW_PARAMS then rejects. Cannot be tested from a CPU-only suite — it
+      builds its own hwp via `audio_query_caps`, which fails closed on any fd a
+      test can supply. Pairs with the seam item above.
+- [ ] **Extend the distlib drift gate to the `.deps` sidecars**
+      (`.github/workflows/ci.yml`) — covers only the two `.cyr` bundles. Effectively
+      self-healing today: every release bumps the `# Version:` stamp inside both
+      `.cyr` files, forcing a `cyrius distlib` run that rewrites the sidecars in
+      the same operation. Low value; listed for completeness.
+- [ ] **Six mask call sites pass the HW param number straight in as a mask index**,
+      relying on `FIRST_MASK == 0` — asymmetric with the twelve interval sites that
+      subtract `FIRST_INTERVAL` explicitly. Correct today and pinned by tests;
+      cosmetic consistency only.
+
+### Closed at 1.2.1 (the seven items 1.2.0 carried forward)
+
+Handle invalidation on close · `VANI_ERR_DISCONNECTED` dead taxonomy entry and the
+missing `SND_PCM_STATE_DISCONNECTED` (which also meant the retry logic treated an
+unplugged device as recoverable) · i64 → u32 truncation in `_hwp_interval_set_exact` ·
+the missing `[0,255]` bound in `_hwp_mask_set_value` · `avail_min == 0` reaching the
+kernel · the stale `boundary` field documentation · four comments referencing the
+deleted stdlib `audio.cyr`.
+
+See [`docs/audit/2026-08-20-v1.2.1-audit.md`](../audit/2026-08-20-v1.2.1-audit.md).
 
 **Declined, recorded so they are not re-litigated** (all assessed in the 1.2.0
 sweep and argued against on the merits):

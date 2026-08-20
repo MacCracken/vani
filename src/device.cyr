@@ -1,5 +1,5 @@
 # @public — stable API surface
-# device.cyr — VaniDevice handle wrapping stdlib audio.cyr
+# device.cyr — VaniDevice handle wrapping src/alsa.cyr
 #
 # audio.cyr (in cyrius stdlib) gives us the raw fd + ioctl primitives
 # but stops at "store the params on the handle struct". VaniDevice
@@ -8,7 +8,7 @@
 # discovery (yukti's job) feeds straight into open (vani's job).
 #
 # VaniDevice struct layout (64 bytes):
-#   +0:  audio_h   — pointer to stdlib audio handle (32 bytes from audio.cyr)
+#   +0:  audio_h   — pointer to the audio handle (32 bytes, src/alsa.cyr)
 #   +8:  card      — ALSA card number
 #   +16: device    — ALSA device number
 #   +24: format    — VaniFormat ptr (or 0 until configured)
@@ -41,6 +41,10 @@ enum VaniState {
     VANI_STATE_DRAINING  = 5;
     VANI_STATE_PAUSED    = 6;
     VANI_STATE_SUSPENDED = 7;
+    # Mirrors SND_PCM_STATE_DISCONNECTED. Added 1.2.1: without it, an
+    # unplugged device mapped to UNKNOWN and VANI_ERR_DISCONNECTED —
+    # a public error code since v0.2.0 — was produced by no path at all.
+    VANI_STATE_DISCONNECTED = 8;
     VANI_STATE_UNKNOWN   = 99;
 }
 
@@ -53,14 +57,20 @@ fn vani_state_name(s): i64 {
     if (s == VANI_STATE_DRAINING)  { return "DRAINING"; }
     if (s == VANI_STATE_PAUSED)    { return "PAUSED"; }
     if (s == VANI_STATE_SUSPENDED) { return "SUSPENDED"; }
+    if (s == VANI_STATE_DISCONNECTED) { return "DISCONNECTED"; }
     return "UNKNOWN";
 }
 
 # Map a raw audio_get_state result (kernel int, possibly -1) into
-# the typed enum. Anything outside [0, 7] becomes VANI_STATE_UNKNOWN.
+# the typed enum. Anything outside [0, 8] becomes VANI_STATE_UNKNOWN.
+#
+# The upper bound was 7 through 1.2.0, so a DISCONNECTED device (kernel
+# state 8) reported UNKNOWN. Widening it is a deliberate behaviour change
+# in a minor: callers that treated UNKNOWN as "device is gone" now get the
+# specific state instead, which is what the enum was for.
 fn vani_state_from_raw(raw): i64 {
     if (raw < 0) { return VANI_STATE_UNKNOWN; }
-    if (raw > 7) { return VANI_STATE_UNKNOWN; }
+    if (raw > 8) { return VANI_STATE_UNKNOWN; }
     return raw;
 }
 
@@ -118,10 +128,19 @@ fn vani_open_capture(card, device): i64 {
 
 # Close releases the underlying audio handle and the VaniDevice
 # wrapper. Always returns 0 — close is best-effort.
+# Idempotent: the handle slot is zeroed after the close, so a second
+# call is a no-op rather than a second close of a descriptor the kernel
+# may already have handed to someone else. (Not idempotent from v0.2.0
+# through 1.2.0 — filed LOW by the 1.2.0 sweep and fixed at 1.2.1;
+# no in-tree path double-closes, so this is hardening for
+# out-of-tree consumers.)
 fn vani_close(d): i64 {
     if (d == 0) { return 0; }
     var h = load64(d);
-    if (h != 0) { audio_close(h); }
+    if (h != 0) {
+        audio_close(h);
+        store64(d, 0);
+    }
     return 0;
 }
 

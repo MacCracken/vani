@@ -1,7 +1,7 @@
 # @public — stable API surface
 # format.cyr — sample format helpers + negotiation
 #
-# Re-uses AlsaFormat constants from stdlib audio.cyr. Adds the
+# Re-uses AlsaFormat constants from src/alsa.cyr. Adds the
 # higher-level "what does the source PCM look like" queries that the
 # raw ioctl layer doesn't speak.
 #

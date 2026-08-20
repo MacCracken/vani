@@ -27,6 +27,13 @@ fn vani_record(d, buf, frames): i64 {
         if (got >= 0) { return vani_ok(got); }
         return vani_err_result(VANI_ERR_OVERRUN);
     }
+    if (st == SND_PCM_STATE_DISCONNECTED) {
+        # Device is gone — no recovery is possible and retrying would
+        # spin. Surface the specific code rather than the generic one.
+        # VANI_ERR_DISCONNECTED existed as a public code since v0.2.0 but
+        # was produced by no path until 1.2.1.
+        return vani_err_result(VANI_ERR_DISCONNECTED);
+    }
     if (st == SND_PCM_STATE_SUSPENDED) {
         var rr = audio_resume(h);
         if (rr < 0) {

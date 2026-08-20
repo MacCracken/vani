@@ -531,6 +531,8 @@ fn test_vani_state_constants_match_alsa() {
     assert_eq(VANI_STATE_DRAINING,  SND_PCM_STATE_DRAINING,  "DRAINING");
     assert_eq(VANI_STATE_PAUSED,    SND_PCM_STATE_PAUSED,    "PAUSED");
     assert_eq(VANI_STATE_SUSPENDED, SND_PCM_STATE_SUSPENDED, "SUSPENDED");
+    assert_eq(VANI_STATE_DISCONNECTED, SND_PCM_STATE_DISCONNECTED, "DISCONNECTED");
+    assert_eq(SND_PCM_STATE_DISCONNECTED, 8, "kernel DISCONNECTED = 8");
     return 0;
 }
 
@@ -538,7 +540,9 @@ fn test_vani_state_from_raw() {
     assert_eq(vani_state_from_raw(0),      VANI_STATE_OPEN,    "0 → OPEN");
     assert_eq(vani_state_from_raw(7),      VANI_STATE_SUSPENDED, "7 → SUSPENDED");
     assert_eq(vani_state_from_raw(0 - 1),  VANI_STATE_UNKNOWN, "-1 → UNKNOWN");
-    assert_eq(vani_state_from_raw(8),      VANI_STATE_UNKNOWN, "8 → UNKNOWN");
+    assert_eq(vani_state_from_raw(8),      VANI_STATE_DISCONNECTED,
+      "8 → DISCONNECTED (was UNKNOWN through 1.2.0)");
+    assert_eq(vani_state_from_raw(9),      VANI_STATE_UNKNOWN, "9 → UNKNOWN");
     assert_eq(vani_state_from_raw(99),     VANI_STATE_UNKNOWN, "99 → UNKNOWN");
     return 0;
 }

@@ -135,6 +135,10 @@ enum AlsaPcmState {
     SND_PCM_STATE_DRAINING  = 5;
     SND_PCM_STATE_PAUSED    = 6;
     SND_PCM_STATE_SUSPENDED = 7;
+    # Kernel state 8. Missing from this enum v0.2.0 through 1.2.0, which
+    # is why a device unplug was indistinguishable from a transient write
+    # error and VANI_ERR_DISCONNECTED was never produced by any path.
+    SND_PCM_STATE_DISCONNECTED = 8;
 }
 
 # ================================================================
@@ -258,7 +262,16 @@ fn _hwp_init_any(hwp): i64 {
 
 # Constrain a mask to a single value (zero all bits, then set the
 # bit at position `value`). value is in [0, 255] for 256-bit masks.
+# `value` is a bit index into a 256-bit snd_mask. Enforce the [0,255]
+# precondition the comment above already documented, matching the guard
+# its read-side twin _hwp_mask_has_bit has always had. Unreachable from
+# any in-tree caller (all pass enum constants), but vani_format_new
+# stores alsa_fmt unvalidated, so an out-of-tree caller could reach it;
+# a violating value writes outside the mask and, past ~4576, outside the
+# 608-byte struct. Returns -1 on a rejected value (1.2.1).
 fn _hwp_mask_set_value(hwp, mask_idx, value): i64 {
+    if (value < 0)   { return 0 - 1; }
+    if (value > 255) { return 0 - 1; }
     var moff = _hwp_mask_off(mask_idx);
     var w = 0;
     while (w < 8) {
@@ -273,7 +286,14 @@ fn _hwp_mask_set_value(hwp, mask_idx, value): i64 {
 }
 
 # Constrain an interval to an exact value: min=max=value, integer flag set.
+# `value` lands in the u32 snd_interval.min/max. Reject anything that
+# does not fit rather than letting store32 truncate it silently — the
+# handle caches the untruncated value, so a truncating write left the
+# device running at one rate while vani reported another. Returns -1 on
+# a rejected value (1.2.1, P2 truncation item).
 fn _hwp_interval_set_exact(hwp, int_idx, value): i64 {
+    if (value < 0)          { return 0 - 1; }
+    if (value > 4294967295) { return 0 - 1; }
     var ioff = _hwp_interval_off(int_idx);
     store32(hwp + ioff + 0, value);
     store32(hwp + ioff + 4, value);
@@ -596,11 +616,16 @@ fn audio_close(dev): i64 {
     # the active slot, so the DAC stops). No DROP ioctl — snd_close is
     # the whole teardown.
     sys_snd_close(load64(dev));
+    store64(dev, 0);
     return 0;
     #else
     var fd = load64(dev);
+    if (fd == 0) { return 0; }
     syscall(SYS_IOCTL, fd, SNDRV_PCM_IOCTL_DROP, 0);
     sys_close(fd);
+    # Zero the slot so a second close is a no-op rather than closing a
+    # descriptor the kernel may have already recycled to another owner.
+    store64(dev, 0);
     return 0;
     #endif
 }
@@ -756,14 +781,21 @@ fn audio_set_params(dev, rate, channels, bit_depth): i64 {
 # already through HW_PARAMS (i.e. in SETUP state). The other SW
 # fields take sane defaults:
 #   period_step = 1, xfer_align = 1, silence threshold/size = 0,
-#   boundary = AUDIO_FRAMES_MAX (2^28 — plenty of wraparound headroom).
+#   boundary — kernel-owned OUTPUT. snd_pcm_sw_params() computes it from
+#     buffer_size and writes it back; the value vani stores here is
+#     ignored on input. (Documented as an input "= AUDIO_FRAMES_MAX
+#     (2^28 — plenty of wraparound headroom)" from v0.4.0 through 1.2.0,
+#     which misdescribed the field. Corrected at 1.2.1.)
 # Call BEFORE prepare() — kernel rejects SW_PARAMS once running.
 
 fn audio_set_sw_params(dev, start_threshold, stop_threshold, avail_min): i64 {
     if (dev == 0)               { return 0 - 1; }
     if (start_threshold < 0)    { return 0 - 1; }
     if (stop_threshold < 0)     { return 0 - 1; }
-    if (avail_min < 0)          { return 0 - 1; }
+    # The kernel rejects avail_min == 0 with -EINVAL, which surfaced to
+    # the caller as an opaque VANI_ERR_SW_PARAMS. Reject it here so the
+    # failure names its own cause (1.2.1).
+    if (avail_min <= 0)         { return 0 - 1; }
     #ifdef CYRIUS_TARGET_AGNOS
     # agnos: start/stop thresholds are kernel-owned (the BDL ring self-
     # paces via the 100 Hz servicer). Accept the call as a no-op so the

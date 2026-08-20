@@ -90,3 +90,16 @@ timestamp,commit,branch,benchmark,estimate_ns
 2026-08-20T18:22:37Z,dffdf95,main,hwp_mask_has_bit,8
 2026-08-20T18:22:37Z,dffdf95,main,negotiate_format_pick,10
 2026-08-20T18:22:37Z,dffdf95,main,ring_200ms_playback,84826
+2026-08-20T18:43:06Z,f3cd5ae,main,bytes_per_frame,10
+2026-08-20T18:43:06Z,f3cd5ae,main,frames_to_bytes,11
+2026-08-20T18:43:06Z,f3cd5ae,main,ms_to_frames,5
+2026-08-20T18:43:06Z,f3cd5ae,main,alsa_for,3
+2026-08-20T18:43:06Z,f3cd5ae,main,ring_used,8
+2026-08-20T18:43:06Z,f3cd5ae,main,ring_write_64b,180
+2026-08-20T18:43:06Z,f3cd5ae,main,ring_read_64b,344
+2026-08-20T18:43:06Z,f3cd5ae,main,hwp_init_any,1008
+2026-08-20T18:43:06Z,f3cd5ae,main,hwp_mask_set_value,21
+2026-08-20T18:43:06Z,f3cd5ae,main,hwp_interval_set_exact,10
+2026-08-20T18:43:06Z,f3cd5ae,main,hwp_mask_has_bit,8
+2026-08-20T18:43:06Z,f3cd5ae,main,negotiate_format_pick,11
+2026-08-20T18:43:06Z,f3cd5ae,main,ring_200ms_playback,91611

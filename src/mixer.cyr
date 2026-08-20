@@ -103,10 +103,13 @@ fn vani_mixer_open(card): i64 {
     #endif
 }
 
+# Idempotent — see vani_close. The fd slot is zeroed after the close.
 fn vani_mixer_close(m): i64 {
     if (m == 0) { return 0; }
     var fd = load64(m);
+    if (fd == 0) { return 0; }
     sys_close(fd);
+    store64(m, 0);
     return 0;
 }
 
