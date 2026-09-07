@@ -221,9 +221,9 @@ fn test_yukti_direction_matches_vani_direction() {
 }
 
 fn test_open_yukti_null_descriptor() {
-    var res = vani_open_yukti(0);
-    assert_eq(is_ok(res), 0, "null desc returns Err");
-    var e = payload(res);
+    var res_tag, res = vani_open_yukti(0);
+    assert_eq(is_ok(res_tag), 0, "null desc returns Err");
+    var e = res;
     assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
       "null desc → ERR_YUKTI_DESCRIPTOR");
     return 0;
@@ -257,9 +257,9 @@ fn test_open_yukti_unknown_direction() {
     store64(d + 8,  0);
     store64(d + 16, 0);
     store64(d + 24, 42);   # invalid direction
-    var res = vani_open_yukti(d);
-    assert_eq(is_ok(res), 0, "invalid direction returns Err");
-    var e = payload(res);
+    var res_tag, res = vani_open_yukti(d);
+    assert_eq(is_ok(res_tag), 0, "invalid direction returns Err");
+    var e = res;
     assert_eq(vani_err_code(e), VANI_ERR_YUKTI_DESCRIPTOR,
       "invalid direction → ERR_YUKTI_DESCRIPTOR");
     return 0;
@@ -1619,9 +1619,9 @@ fn test_ring_max_bytes_constant() {
 fn test_device_wrap_field_projection() {
     var h = alloc(32);
     store64(h, 0 - 1);
-    var res = _vani_device_wrap(h, 3, 7, VANI_CAPTURE);
-    assert_eq(is_ok(res), 1, "wrap of a live handle is Ok");
-    var d = payload(res);
+    var res_tag, res = _vani_device_wrap(h, 3, 7, VANI_CAPTURE);
+    assert_eq(is_ok(res_tag), 1, "wrap of a live handle is Ok");
+    var d = res;
     assert_eq(vani_audio_handle(d), h,            "+0  audio_h");
     assert_eq(vani_card(d),         3,            "+8  card");
     assert_eq(vani_device_id(d),    7,            "+16 device");
@@ -1636,9 +1636,9 @@ fn test_device_wrap_field_projection() {
 }
 
 fn test_device_wrap_null_handle_is_device_open_err() {
-    var res = _vani_device_wrap(0, 0, 0, VANI_PLAYBACK);
-    assert_eq(is_ok(res), 0, "null audio handle is Err");
-    assert_eq(vani_err_code(payload(res)), VANI_ERR_DEVICE_OPEN,
+    var res_tag, res = _vani_device_wrap(0, 0, 0, VANI_PLAYBACK);
+    assert_eq(is_ok(res_tag), 0, "null audio handle is Err");
+    assert_eq(vani_err_code(res), VANI_ERR_DEVICE_OPEN,
       "→ VANI_ERR_DEVICE_OPEN");
     assert_eq(vani_close(0), 0, "close(null) is a no-op");
     return 0;
@@ -1647,12 +1647,12 @@ fn test_device_wrap_null_handle_is_device_open_err() {
 # card > 99 fails inside _audio_devpath, so this reaches
 # VANI_ERR_DEVICE_OPEN without opening anything under /dev/snd.
 fn test_open_rejects_out_of_range_card() {
-    var pres = vani_open_playback(100, 0);
-    assert_eq(is_ok(pres), 0, "playback card 100 is Err");
-    assert_eq(vani_err_code(payload(pres)), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
-    var cres = vani_open_capture(100, 0);
-    assert_eq(is_ok(cres), 0, "capture card 100 is Err");
-    assert_eq(vani_err_code(payload(cres)), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
+    var pres_tag, pres = vani_open_playback(100, 0);
+    assert_eq(is_ok(pres_tag), 0, "playback card 100 is Err");
+    assert_eq(vani_err_code(pres), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
+    var cres_tag, cres = vani_open_capture(100, 0);
+    assert_eq(is_ok(cres_tag), 0, "capture card 100 is Err");
+    assert_eq(vani_err_code(cres), VANI_ERR_DEVICE_OPEN, "→ DEVICE_OPEN");
     return 0;
 }
 
@@ -1689,19 +1689,26 @@ fn test_latency_preset_period_math() {
 
 fn test_device_null_guards() {
     var fmt = vani_format_default();
-    assert_eq(vani_err_code(payload(vani_configure(0, fmt))),
+    var _ct41, _cv41 = vani_configure(0, fmt);
+    assert_eq(vani_err_code(_cv41),
       VANI_ERR_DEVICE_INVALID, "configure null device");
-    assert_eq(vani_err_code(payload(vani_configure_buffered(0, fmt, 0, 0))),
+    var _ct42, _cv42 = vani_configure_buffered(0, fmt, 0, 0);
+    assert_eq(vani_err_code(_cv42),
       VANI_ERR_DEVICE_INVALID, "configure_buffered null device");
-    assert_eq(vani_err_code(payload(vani_set_sw_params(0, 1, 1, 1))),
+    var _ct43, _cv43 = vani_set_sw_params(0, 1, 1, 1);
+    assert_eq(vani_err_code(_cv43),
       VANI_ERR_DEVICE_INVALID, "set_sw_params null device");
-    assert_eq(vani_err_code(payload(vani_configure_low_latency(0, fmt))),
+    var _ct44, _cv44 = vani_configure_low_latency(0, fmt);
+    assert_eq(vani_err_code(_cv44),
       VANI_ERR_DEVICE_INVALID, "low_latency null device");
-    assert_eq(vani_err_code(payload(vani_configure_casual(0, fmt))),
+    var _ct45, _cv45 = vani_configure_casual(0, fmt);
+    assert_eq(vani_err_code(_cv45),
       VANI_ERR_DEVICE_INVALID, "casual null device");
-    assert_eq(vani_err_code(payload(vani_resume(0))),
+    var _ct46, _cv46 = vani_resume(0);
+    assert_eq(vani_err_code(_cv46),
       VANI_ERR_DEVICE_INVALID, "resume null device");
-    assert_eq(vani_err_code(payload(vani_format_negotiate(0, fmt))),
+    var _ct47, _cv47 = vani_format_negotiate(0, fmt);
+    assert_eq(vani_err_code(_cv47),
       VANI_ERR_DEVICE_INVALID, "negotiate null device");
     assert_eq(vani_format_is_supported(0, fmt), 0, "is_supported null device → 0");
     return 0;
@@ -1710,16 +1717,21 @@ fn test_device_null_guards() {
 fn test_device_null_format_guards() {
     var h = alloc(32);
     store64(h, 0 - 1);
-    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
-    assert_eq(vani_err_code(payload(vani_configure(d, 0))),
+    var d_tag, d = _vani_device_wrap(h, 0, 0, VANI_PLAYBACK);
+    var _ct36, _cv36 = vani_configure(d, 0);
+    assert_eq(vani_err_code(_cv36),
       VANI_ERR_FORMAT_UNSUPPORTED, "configure null format");
-    assert_eq(vani_err_code(payload(vani_configure_buffered(d, 0, 0, 0))),
+    var _ct37, _cv37 = vani_configure_buffered(d, 0, 0, 0);
+    assert_eq(vani_err_code(_cv37),
       VANI_ERR_FORMAT_UNSUPPORTED, "configure_buffered null format");
-    assert_eq(vani_err_code(payload(vani_configure_low_latency(d, 0))),
+    var _ct38, _cv38 = vani_configure_low_latency(d, 0);
+    assert_eq(vani_err_code(_cv38),
       VANI_ERR_FORMAT_UNSUPPORTED, "low_latency null format");
-    assert_eq(vani_err_code(payload(vani_configure_casual(d, 0))),
+    var _ct39, _cv39 = vani_configure_casual(d, 0);
+    assert_eq(vani_err_code(_cv39),
       VANI_ERR_FORMAT_UNSUPPORTED, "casual null format");
-    assert_eq(vani_err_code(payload(vani_format_negotiate(d, 0))),
+    var _ct40, _cv40 = vani_format_negotiate(d, 0);
+    assert_eq(vani_err_code(_cv40),
       VANI_ERR_FORMAT_UNSUPPORTED, "negotiate null format");
     assert_eq(vani_format_is_supported(d, 0), 0, "is_supported null format → 0");
     return 0;
@@ -1733,22 +1745,26 @@ fn test_play_and_record_guards() {
     var buf = alloc(64);
     var h = alloc(32);
     store64(h, 0 - 1);
-    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
-    assert_eq(vani_err_code(payload(vani_play(0, buf, 4))),
+    var d_tag, d = _vani_device_wrap(h, 0, 0, VANI_PLAYBACK);
+    var _ct32, _cv32 = vani_play(0, buf, 4);
+    assert_eq(vani_err_code(_cv32),
       VANI_ERR_DEVICE_INVALID, "play null device");
-    assert_eq(vani_err_code(payload(vani_play(d, 0, 4))),
+    var _ct33, _cv33 = vani_play(d, 0, 4);
+    assert_eq(vani_err_code(_cv33),
       VANI_ERR_WRITE, "play null buffer → WRITE");
-    var zres = vani_play(d, buf, 0);
-    assert_eq(is_ok(zres), 1, "play 0 frames is Ok");
-    assert_eq(payload(zres), 0, "play 0 frames wrote 0");
+    var zres_tag, zres = vani_play(d, buf, 0);
+    assert_eq(is_ok(zres_tag), 1, "play 0 frames is Ok");
+    assert_eq(zres, 0, "play 0 frames wrote 0");
     assert_eq(is_ok(vani_play(d, buf, 0 - 1)), 1, "play negative frames is Ok(0)");
-    assert_eq(vani_err_code(payload(vani_record(0, buf, 4))),
+    var _ct34, _cv34 = vani_record(0, buf, 4);
+    assert_eq(vani_err_code(_cv34),
       VANI_ERR_DEVICE_INVALID, "record null device");
-    assert_eq(vani_err_code(payload(vani_record(d, 0, 4))),
+    var _ct35, _cv35 = vani_record(d, 0, 4);
+    assert_eq(vani_err_code(_cv35),
       VANI_ERR_READ, "record null buffer → READ");
-    var rres = vani_record(d, buf, 0);
-    assert_eq(is_ok(rres), 1, "record 0 frames is Ok");
-    assert_eq(payload(rres), 0, "record 0 frames read 0");
+    var rres_tag, rres = vani_record(d, buf, 0);
+    assert_eq(is_ok(rres_tag), 1, "record 0 frames is Ok");
+    assert_eq(rres, 0, "record 0 frames read 0");
     return 0;
 }
 
@@ -1756,29 +1772,33 @@ fn test_play_from_ring_guards() {
     var rb = vani_ring_new(64);
     var h = alloc(32);
     store64(h, 0 - 1);
-    var d = payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
-    assert_eq(vani_err_code(payload(vani_play_from_ring(0, rb))),
+    var d_tag, d = _vani_device_wrap(h, 0, 0, VANI_PLAYBACK);
+    var _ct28, _cv28 = vani_play_from_ring(0, rb);
+    assert_eq(vani_err_code(_cv28),
       VANI_ERR_DEVICE_INVALID, "null device");
-    assert_eq(vani_err_code(payload(vani_play_from_ring(d, 0))),
+    var _ct29, _cv29 = vani_play_from_ring(d, 0);
+    assert_eq(vani_err_code(_cv29),
       VANI_ERR_WRITE, "null ring → WRITE");
     # format still 0 on the handle — unconfigured device.
-    assert_eq(vani_err_code(payload(vani_play_from_ring(d, rb))),
+    var _ct30, _cv30 = vani_play_from_ring(d, rb);
+    assert_eq(vani_err_code(_cv30),
       VANI_ERR_FORMAT_UNSUPPORTED, "unconfigured device");
     # A format whose alsa_fmt has no byte width yields bpf 0.
     store64(d + 24, vani_format_new(48000, 2, 16, 99));
-    assert_eq(vani_err_code(payload(vani_play_from_ring(d, rb))),
+    var _ct31, _cv31 = vani_play_from_ring(d, rb);
+    assert_eq(vani_err_code(_cv31),
       VANI_ERR_FORMAT_UNSUPPORTED, "bpf 0 → FORMAT_UNSUPPORTED");
     # Valid format, empty ring — returns Ok(0) before touching the device.
     store64(d + 24, vani_format_default());
-    var eres = vani_play_from_ring(d, rb);
-    assert_eq(is_ok(eres), 1, "empty ring is Ok");
-    assert_eq(payload(eres), 0, "empty ring wrote 0 frames");
+    var eres_tag, eres = vani_play_from_ring(d, rb);
+    assert_eq(is_ok(eres_tag), 1, "empty ring is Ok");
+    assert_eq(eres, 0, "empty ring wrote 0 frames");
     # Fewer bytes than one frame is also a no-op, not a short write.
     var src = alloc(4);
     vani_ring_write(rb, src, 3);
-    var pres = vani_play_from_ring(d, rb);
-    assert_eq(is_ok(pres), 1, "sub-frame residue is Ok");
-    assert_eq(payload(pres), 0, "sub-frame residue wrote 0 frames");
+    var pres_tag, pres = vani_play_from_ring(d, rb);
+    assert_eq(is_ok(pres_tag), 1, "sub-frame residue is Ok");
+    assert_eq(pres, 0, "sub-frame residue wrote 0 frames");
     return 0;
 }
 
@@ -1787,19 +1807,23 @@ fn test_play_from_ring_guards() {
 fn test_record_to_ring_guards() {
     var h = alloc(32);
     store64(h, 0 - 1);
-    var d = payload(_vani_device_wrap(h, 0, 0, VANI_CAPTURE));
+    var d_tag, d = _vani_device_wrap(h, 0, 0, VANI_CAPTURE);
     var rb = vani_ring_new(8);
-    assert_eq(vani_err_code(payload(vani_record_to_ring(0, rb, 1))),
+    var _ct24, _cv24 = vani_record_to_ring(0, rb, 1);
+    assert_eq(vani_err_code(_cv24),
       VANI_ERR_DEVICE_INVALID, "null device");
-    assert_eq(vani_err_code(payload(vani_record_to_ring(d, 0, 1))),
+    var _ct25, _cv25 = vani_record_to_ring(d, 0, 1);
+    assert_eq(vani_err_code(_cv25),
       VANI_ERR_READ, "null ring → READ");
-    assert_eq(vani_err_code(payload(vani_record_to_ring(d, rb, 1))),
+    var _ct26, _cv26 = vani_record_to_ring(d, rb, 1);
+    assert_eq(vani_err_code(_cv26),
       VANI_ERR_FORMAT_UNSUPPORTED, "unconfigured device");
     store64(d + 24, vani_format_default());   # bpf = 4
     var src = alloc(8);
     vani_ring_write(rb, src, 8);              # ring is now full
     assert_eq(vani_ring_is_full(rb), 1, "ring full");
-    assert_eq(vani_err_code(payload(vani_record_to_ring(d, rb, 4))),
+    var _ct27, _cv27 = vani_record_to_ring(d, rb, 4);
+    assert_eq(vani_err_code(_cv27),
       VANI_ERR_BUFFER_FULL, "full ring → BUFFER_FULL");
     return 0;
 }
@@ -1809,12 +1833,12 @@ fn test_record_to_ring_guards() {
 # ================================================================
 
 fn test_mixer_open_rejects_bad_card() {
-    var r100 = vani_mixer_open(100);
-    assert_eq(is_ok(r100), 0, "card 100 is Err");
-    assert_eq(vani_err_code(payload(r100)), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
-    var rneg = vani_mixer_open(0 - 1);
-    assert_eq(is_ok(rneg), 0, "card -1 is Err");
-    assert_eq(vani_err_code(payload(rneg)), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
+    var r100_tag, r100 = vani_mixer_open(100);
+    assert_eq(is_ok(r100_tag), 0, "card 100 is Err");
+    assert_eq(vani_err_code(r100), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
+    var rneg_tag, rneg = vani_mixer_open(0 - 1);
+    assert_eq(is_ok(rneg_tag), 0, "card -1 is Err");
+    assert_eq(vani_err_code(rneg), VANI_ERR_MIXER_OPEN, "→ MIXER_OPEN");
     assert_eq(vani_mixer_close(0), 0, "close(null) is a no-op");
     return 0;
 }
@@ -1832,27 +1856,38 @@ fn test_mixer_elem_guards() {
     var m = alloc(16);
     store64(m, 0 - 1);
     store64(m + 8, 0);
-    assert_eq(vani_err_code(payload(vani_mixer_set_volume(0, "Master", 50))),
+    var _ct13, _cv13 = vani_mixer_set_volume(0, "Master", 50);
+    assert_eq(vani_err_code(_cv13),
       VANI_ERR_MIXER_ELEM, "set_volume null mixer");
-    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, 0, 50))),
+    var _ct14, _cv14 = vani_mixer_set_volume(m, 0, 50);
+    assert_eq(vani_err_code(_cv14),
       VANI_ERR_MIXER_ELEM, "set_volume null element name");
-    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, "Master", 0 - 1))),
+    var _ct15, _cv15 = vani_mixer_set_volume(m, "Master", 0 - 1);
+    assert_eq(vani_err_code(_cv15),
       VANI_ERR_MIXER_ELEM, "set_volume percent -1");
-    assert_eq(vani_err_code(payload(vani_mixer_set_volume(m, "Master", 101))),
+    var _ct16, _cv16 = vani_mixer_set_volume(m, "Master", 101);
+    assert_eq(vani_err_code(_cv16),
       VANI_ERR_MIXER_ELEM, "set_volume percent 101");
-    assert_eq(vani_err_code(payload(vani_mixer_get_volume(0, "Master"))),
+    var _ct17, _cv17 = vani_mixer_get_volume(0, "Master");
+    assert_eq(vani_err_code(_cv17),
       VANI_ERR_MIXER_ELEM, "get_volume null mixer");
-    assert_eq(vani_err_code(payload(vani_mixer_get_volume(m, 0))),
+    var _ct18, _cv18 = vani_mixer_get_volume(m, 0);
+    assert_eq(vani_err_code(_cv18),
       VANI_ERR_MIXER_ELEM, "get_volume null element name");
-    assert_eq(vani_err_code(payload(vani_mixer_set_mute(0, "Master", 1))),
+    var _ct19, _cv19 = vani_mixer_set_mute(0, "Master", 1);
+    assert_eq(vani_err_code(_cv19),
       VANI_ERR_MIXER_ELEM, "set_mute null mixer");
-    assert_eq(vani_err_code(payload(vani_mixer_set_mute(m, 0, 1))),
+    var _ct20, _cv20 = vani_mixer_set_mute(m, 0, 1);
+    assert_eq(vani_err_code(_cv20),
       VANI_ERR_MIXER_ELEM, "set_mute null element name");
-    assert_eq(vani_err_code(payload(vani_mixer_get_mute(0, "Master"))),
+    var _ct21, _cv21 = vani_mixer_get_mute(0, "Master");
+    assert_eq(vani_err_code(_cv21),
       VANI_ERR_MIXER_ELEM, "get_mute null mixer");
-    assert_eq(vani_err_code(payload(vani_mixer_get_mute(m, 0))),
+    var _ct22, _cv22 = vani_mixer_get_mute(m, 0);
+    assert_eq(vani_err_code(_cv22),
       VANI_ERR_MIXER_ELEM, "get_mute null element name");
-    assert_eq(vani_err_code(payload(vani_mixer_list_elements(0))),
+    var _ct23, _cv23 = vani_mixer_list_elements(0);
+    assert_eq(vani_err_code(_cv23),
       VANI_ERR_MIXER_ELEM, "list_elements null mixer");
     return 0;
 }
@@ -1970,17 +2005,17 @@ fn test_err_recoverable_exhaustive() {
 }
 
 fn test_err_result_helpers() {
-    var ok = vani_ok(42);
-    assert_eq(is_ok(ok), 1, "vani_ok is Ok");
-    assert_eq(payload(ok), 42, "vani_ok carries the value");
-    var e = vani_err_result(VANI_ERR_DEVICE_BUSY);
-    assert_eq(is_ok(e), 0, "vani_err_result is Err");
-    assert_eq(vani_err_code(payload(e)), VANI_ERR_DEVICE_BUSY, "code preserved");
-    assert_eq(vani_err_detail(payload(e)), 0, "no detail");
-    var em = vani_err_result_msg(VANI_ERR_OTHER, "context string");
-    assert_eq(is_ok(em), 0, "vani_err_result_msg is Err");
-    assert_eq(vani_err_code(payload(em)), VANI_ERR_OTHER, "code preserved");
-    assert_streq(vani_err_detail(payload(em)), "context string", "detail preserved");
+    var ok_tag, ok = vani_ok(42);
+    assert_eq(is_ok(ok_tag), 1, "vani_ok is Ok");
+    assert_eq(ok, 42, "vani_ok carries the value");
+    var e_tag, e = vani_err_result(VANI_ERR_DEVICE_BUSY);
+    assert_eq(is_ok(e_tag), 0, "vani_err_result is Err");
+    assert_eq(vani_err_code(e), VANI_ERR_DEVICE_BUSY, "code preserved");
+    assert_eq(vani_err_detail(e), 0, "no detail");
+    var em_tag, em = vani_err_result_msg(VANI_ERR_OTHER, "context string");
+    assert_eq(is_ok(em_tag), 0, "vani_err_result_msg is Err");
+    assert_eq(vani_err_code(em), VANI_ERR_OTHER, "code preserved");
+    assert_streq(vani_err_detail(em), "context string", "detail preserved");
     return 0;
 }
 
@@ -2052,36 +2087,45 @@ fn _test_bad_fd_device(): i64 {
     store64(h + 8, 0);
     store64(h + 16, 0);
     store64(h + 24, 0);
-    return payload(_vani_device_wrap(h, 0, 0, VANI_PLAYBACK));
+    var _rt12, _rv12 = _vani_device_wrap(h, 0, 0, VANI_PLAYBACK);
+    return _rv12;
 }
 
 fn test_ioctl_failure_maps_to_hw_and_sw_params() {
     var d = _test_bad_fd_device();
     var fmt = vani_format_default();
-    assert_eq(vani_err_code(payload(vani_configure(d, fmt))),
+    var _ct7, _cv7 = vani_configure(d, fmt);
+    assert_eq(vani_err_code(_cv7),
       VANI_ERR_HW_PARAMS, "HW_PARAMS ioctl failure → VANI_ERR_HW_PARAMS");
     assert_eq(vani_format_get(d), 0,
       "format NOT cached when HW_PARAMS fails");
-    assert_eq(vani_err_code(payload(vani_configure_buffered(d, fmt, 480, 1920))),
+    var _ct8, _cv8 = vani_configure_buffered(d, fmt, 480, 1920);
+    assert_eq(vani_err_code(_cv8),
       VANI_ERR_HW_PARAMS, "buffered configure failure → HW_PARAMS");
-    assert_eq(vani_err_code(payload(vani_set_sw_params(d, 1, 1920, 480))),
+    var _ct9, _cv9 = vani_set_sw_params(d, 1, 1920, 480);
+    assert_eq(vani_err_code(_cv9),
       VANI_ERR_SW_PARAMS, "SW_PARAMS ioctl failure → VANI_ERR_SW_PARAMS");
-    assert_eq(vani_err_code(payload(vani_configure_low_latency(d, fmt))),
+    var _ct10, _cv10 = vani_configure_low_latency(d, fmt);
+    assert_eq(vani_err_code(_cv10),
       VANI_ERR_HW_PARAMS, "low-latency preset propagates HW_PARAMS");
-    assert_eq(vani_err_code(payload(vani_configure_casual(d, fmt))),
+    var _ct11, _cv11 = vani_configure_casual(d, fmt);
+    assert_eq(vani_err_code(_cv11),
       VANI_ERR_HW_PARAMS, "casual preset propagates HW_PARAMS");
     return 0;
 }
 
 fn test_ioctl_failure_maps_to_prepare_start_resume() {
     var d = _test_bad_fd_device();
-    assert_eq(vani_err_code(payload(vani_prepare(d))),
+    var _ct4, _cv4 = vani_prepare(d);
+    assert_eq(vani_err_code(_cv4),
       VANI_ERR_PREPARE, "PREPARE ioctl failure → VANI_ERR_PREPARE");
-    assert_eq(vani_err_code(payload(vani_start(d))),
+    var _ct5, _cv5 = vani_start(d);
+    assert_eq(vani_err_code(_cv5),
       VANI_ERR_START, "START ioctl failure → VANI_ERR_START");
     # RESUME fails, so vani_resume falls back to PREPARE, which also
     # fails — the documented -ENOSYS fallback path, exercised.
-    assert_eq(vani_err_code(payload(vani_resume(d))),
+    var _ct6, _cv6 = vani_resume(d);
+    assert_eq(vani_err_code(_cv6),
       VANI_ERR_PREPARE, "resume falls back to prepare, reports PREPARE");
     assert_lt(vani_drain(d), 0, "drain propagates the raw negative");
     assert_lt(vani_drop(d),  0, "drop propagates the raw negative");
@@ -2103,10 +2147,12 @@ fn test_write_failure_without_xrun_is_write_err() {
     var buf = alloc(64);
     # audio_write fails, the STATUS probe also fails (state -1, neither
     # XRUN nor SUSPENDED), so neither recovery arm is taken.
-    assert_eq(vani_err_code(payload(vani_play(d, buf, 4))),
+    var _ct2, _cv2 = vani_play(d, buf, 4);
+    assert_eq(vani_err_code(_cv2),
       VANI_ERR_WRITE, "non-XRUN write failure → VANI_ERR_WRITE");
     assert_eq(vani_xrun_count(d), 0, "xrun counter NOT incremented");
-    assert_eq(vani_err_code(payload(vani_record(d, buf, 4))),
+    var _ct3, _cv3 = vani_record(d, buf, 4);
+    assert_eq(vani_err_code(_cv3),
       VANI_ERR_READ, "non-XRUN read failure → VANI_ERR_READ");
     assert_eq(vani_xrun_count(d), 0, "xrun counter still 0 after read failure");
     return 0;
@@ -2115,7 +2161,8 @@ fn test_write_failure_without_xrun_is_write_err() {
 fn test_negotiate_failure_maps_to_hw_params() {
     var d = _test_bad_fd_device();
     var fmt = vani_format_default();
-    assert_eq(vani_err_code(payload(vani_format_negotiate(d, fmt))),
+    var _ct1, _cv1 = vani_format_negotiate(d, fmt);
+    assert_eq(vani_err_code(_cv1),
       VANI_ERR_HW_PARAMS, "HW_REFINE failure → VANI_ERR_HW_PARAMS");
     assert_eq(vani_format_is_supported(d, fmt), 0,
       "is_supported reports 0 when HW_REFINE fails");
@@ -2126,26 +2173,26 @@ fn test_mixer_elem_info_failure_maps_to_mixer_elem() {
     var m = alloc(16);
     store64(m, 0 - 1);
     store64(m + 8, 0);
-    var vres = vani_mixer_set_volume(m, "Master Playback Volume", 50);
-    assert_eq(is_ok(vres), 0, "ELEM_INFO failure is Err");
-    assert_eq(vani_err_code(payload(vres)), VANI_ERR_MIXER_ELEM, "→ MIXER_ELEM");
-    assert_streq(vani_err_detail(payload(vres)), "ELEM_INFO failed",
+    var vres_tag, vres = vani_mixer_set_volume(m, "Master Playback Volume", 50);
+    assert_eq(is_ok(vres_tag), 0, "ELEM_INFO failure is Err");
+    assert_eq(vani_err_code(vres), VANI_ERR_MIXER_ELEM, "→ MIXER_ELEM");
+    assert_streq(vani_err_detail(vres), "ELEM_INFO failed",
       "detail names the failing ioctl");
-    var gres = vani_mixer_get_volume(m, "Master Playback Volume");
-    assert_streq(vani_err_detail(payload(gres)), "ELEM_INFO failed",
+    var gres_tag, gres = vani_mixer_get_volume(m, "Master Playback Volume");
+    assert_streq(vani_err_detail(gres), "ELEM_INFO failed",
       "get_volume detail");
-    var mres = vani_mixer_set_mute(m, "Master Playback Switch", 1);
-    assert_streq(vani_err_detail(payload(mres)), "ELEM_INFO failed",
+    var mres_tag, mres = vani_mixer_set_mute(m, "Master Playback Switch", 1);
+    assert_streq(vani_err_detail(mres), "ELEM_INFO failed",
       "set_mute detail");
     # get_mute gained the ELEM_INFO type gate its three siblings always
     # had (1.2.0, finding M-1), so it now fails at ELEM_INFO like they
     # do rather than reaching ELEM_READ with an unvalidated element.
-    var rres = vani_mixer_get_mute(m, "Master Playback Switch");
-    assert_streq(vani_err_detail(payload(rres)), "ELEM_INFO failed",
+    var rres_tag, rres = vani_mixer_get_mute(m, "Master Playback Switch");
+    assert_streq(vani_err_detail(rres), "ELEM_INFO failed",
       "get_mute type-gates before ELEM_READ");
-    var lres = vani_mixer_list_elements(m);
-    assert_eq(is_ok(lres), 0, "ELEM_LIST failure is Err");
-    assert_streq(vani_err_detail(payload(lres)), "ELEM_LIST count pass failed",
+    var lres_tag, lres = vani_mixer_list_elements(m);
+    assert_eq(is_ok(lres_tag), 0, "ELEM_LIST failure is Err");
+    assert_streq(vani_err_detail(lres), "ELEM_LIST count pass failed",
       "list detail names the count pass");
     return 0;
 }
@@ -2153,7 +2200,8 @@ fn test_mixer_elem_info_failure_maps_to_mixer_elem() {
 fn test_result_unwrap_passes_ok_through() {
     # Only the Ok arm is testable in-process — the Err arm calls
     # sys_exit(1) by design.
-    assert_eq(vani_result_unwrap(vani_ok(7)), 7, "unwrap of Ok returns the payload");
+    var ok_tag, ok_val = vani_ok(7);
+    assert_eq(vani_result_unwrap(ok_tag, ok_val), 7, "unwrap of Ok returns the payload");
     return 0;
 }
 

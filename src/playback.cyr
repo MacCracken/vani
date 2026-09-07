@@ -93,11 +93,11 @@ fn vani_play_from_ring(d, rb): i64 {
     var scratch = _vani_device_scratch(d, n_bytes);
     if (scratch == 0) { return vani_err_result(VANI_ERR_WRITE); }
     _vani_ring_peek(rb, scratch, n_bytes);
-    var res = vani_play(d, scratch, avail_frames);
+    var res_tag, res = vani_play(d, scratch, avail_frames);
     # On error nothing is consumed — the caller keeps its audio and can
     # retry after recovering the device.
-    if (is_ok(res) == 0) { return res; }
-    var written = payload(res);
+    if (is_ok(res_tag) == 0) { return Err(res); }
+    var written = res;
     if (written < 0) { written = 0; }
     if (written > avail_frames) { written = avail_frames; }
     _vani_ring_advance(rb, written * bpf);

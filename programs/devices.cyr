@@ -84,19 +84,26 @@ fn _first_playback(devs) {
 fn _probe_via_yukti(desc) {
     _puts("\nopening first playback descriptor via vani_open_yukti\n");
 
-    var res = vani_open_yukti(desc);
-    if (is_ok(res) == 0) {
+    var res_tag, res = vani_open_yukti(desc);
+    if (is_ok(res_tag) == 0) {
         _puts("  open: FAIL — ");
-        vani_err_print_name(vani_err_code(payload(res)));
+        vani_err_print_name(vani_err_code(res));
         _puts("\n");
         return 1;
     }
-    var d = payload(res);
+    var d = res;
     _puts("  open: OK fd=");
     fmt_int(audio_fd(vani_audio_handle(d)));
     _puts("\n");
 
-    var st0 = vani_state(d);
+    # NOTE (1.2.3, cyrius 6.6.0 value form): these read the raw ALSA state
+    # via audio_get_state() rather than vani_state(). vani_state() is a
+    # MIXED-return fn — an Err PAIR on its `d == 0` guard, a raw i64 state
+    # otherwise — so under the value form a single-variable bind of it is
+    # refused. On this path `d` came from a successful open and is non-null,
+    # so the direct call is exactly what vani_state() would have returned,
+    # with no ambiguity between "state 1" and "Err". CHANGELOG [1.2.3].
+    var st0 = audio_get_state(vani_audio_handle(d));
     _puts("  state-after-open: ");
     fmt_int(st0);
     _puts(" (");
@@ -109,8 +116,8 @@ fn _probe_via_yukti(desc) {
     }
 
     var fmt = vani_format_default();
-    var cres = vani_configure(d, fmt);
-    if (is_ok(cres) == 0) {
+    var cres_tag, cres = vani_configure(d, fmt);
+    if (is_ok(cres_tag) == 0) {
         _puts("  configure: FAIL\n");
         vani_close(d);
         return 1;
@@ -123,7 +130,7 @@ fn _probe_via_yukti(desc) {
     fmt_int(vani_format_bit_depth(fmt));
     _puts("\n");
 
-    var st1 = vani_state(d);
+    var st1 = audio_get_state(vani_audio_handle(d));
     _puts("  state-after-configure: ");
     _puts(_state_name(st1));
     _puts("\n");
@@ -133,15 +140,15 @@ fn _probe_via_yukti(desc) {
         return 1;
     }
 
-    var pres = vani_prepare(d);
-    if (is_ok(pres) == 0) {
+    var pres_tag, pres = vani_prepare(d);
+    if (is_ok(pres_tag) == 0) {
         _puts("  prepare: FAIL — ");
-        vani_err_print_name(vani_err_code(payload(pres)));
+        vani_err_print_name(vani_err_code(pres));
         _puts("\n");
         vani_close(d);
         return 1;
     }
-    var st2 = vani_state(d);
+    var st2 = audio_get_state(vani_audio_handle(d));
     _puts("  state-after-prepare: ");
     _puts(_state_name(st2));
     _puts("\n");

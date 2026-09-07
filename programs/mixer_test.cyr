@@ -25,21 +25,21 @@ fn main() {
     fmt_int(MIXER_CARD);
     _puts("\n");
 
-    var ores = vani_mixer_open(MIXER_CARD);
-    if (is_ok(ores) == 0) {
+    var ores_tag, ores = vani_mixer_open(MIXER_CARD);
+    if (is_ok(ores_tag) == 0) {
         _puts("open: FAIL\n");
         return 1;
     }
-    var m = payload(ores);
+    var m = ores;
     _puts("  open: OK\n");
 
-    var lres = vani_mixer_list_elements(m);
-    if (is_ok(lres) == 0) {
+    var lres_tag, lres = vani_mixer_list_elements(m);
+    if (is_ok(lres_tag) == 0) {
         _puts("list: FAIL\n");
         vani_mixer_close(m);
         return 1;
     }
-    var lh = payload(lres);
+    var lh = lres;
     var n = vani_mixer_list_count(lh);
     _puts("  elements: ");
     fmt_int(n);
@@ -78,10 +78,10 @@ fn main() {
             _puts(" count=");
             fmt_int(count);
             _puts("]");
-            var vres = vani_mixer_get_volume(m, name_buf);
-            if (is_ok(vres) == 1) {
+            var vres_tag, vres = vani_mixer_get_volume(m, name_buf);
+            if (is_ok(vres_tag) == 1) {
                 _puts(" → ");
-                fmt_int(payload(vres));
+                fmt_int(vres);
                 _puts("%");
             }
         } else {
@@ -89,10 +89,10 @@ fn main() {
                 _puts("  [BOOL count=");
                 fmt_int(count);
                 _puts("]");
-                var bres = vani_mixer_get_mute(m, name_buf);
-                if (is_ok(bres) == 1) {
-                    if (payload(bres) == 1) { _puts(" → MUTED"); }
-                    if (payload(bres) == 0) { _puts(" → on"); }
+                var bres_tag, bres = vani_mixer_get_mute(m, name_buf);
+                if (is_ok(bres_tag) == 1) {
+                    if (bres == 1) { _puts(" → MUTED"); }
+                    if (bres == 0) { _puts(" → on"); }
                 }
             } else {
                 _puts("  [type=");

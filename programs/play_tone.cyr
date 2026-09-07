@@ -68,22 +68,22 @@ fn main() {
     _puts("vani tone — 440 Hz square, 200 ms, card ");
     sys_write(1, "1 device 0\n", 11);
 
-    var res = vani_open_playback(TONE_CARD, TONE_DEVICE);
-    if (is_ok(res) == 0) {
+    var res_tag, res = vani_open_playback(TONE_CARD, TONE_DEVICE);
+    if (is_ok(res_tag) == 0) {
         _puts("open: FAIL\n");
         return 1;
     }
-    var d = payload(res);
+    var d = res;
 
-    var cres = vani_configure(d, vani_format_default());
-    if (is_ok(cres) == 0) {
+    var cres_tag, cres = vani_configure(d, vani_format_default());
+    if (is_ok(cres_tag) == 0) {
         _puts("configure: FAIL\n");
         vani_close(d);
         return 1;
     }
 
-    var pres = vani_prepare(d);
-    if (is_ok(pres) == 0) {
+    var pres_tag, pres = vani_prepare(d);
+    if (is_ok(pres_tag) == 0) {
         _puts("prepare: FAIL\n");
         vani_close(d);
         return 1;
@@ -96,10 +96,10 @@ fn main() {
     var fb[16];
     # quick stderr-style report not strictly needed — just play.
 
-    var play_res = vani_play(d, buf, frames);
-    if (is_ok(play_res) == 0) {
+    var play_res_tag, play_res = vani_play(d, buf, frames);
+    if (is_ok(play_res_tag) == 0) {
         _puts("play: FAIL — ");
-        vani_err_print_name(vani_err_code(payload(play_res)));
+        vani_err_print_name(vani_err_code(play_res));
         _puts("\n");
         vani_close(d);
         return 1;

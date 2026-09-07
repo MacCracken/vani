@@ -20,6 +20,18 @@ enum LatencyCfg {
     LAT_DURATION_MS = 200;
 }
 
+# Preset selector. This was an `&vani_configure_low_latency` fnptr passed
+# through `fncall2` until 1.2.3. Under the cyrius 6.6.0 Result value form a
+# configurator returns a REGISTER PAIR (tag in rax, payload in rdx), and
+# `fncall2` is declared to return one i64 — its hand-asm stores only rax.
+# The payload survived the wrapper purely because nothing in that epilogue
+# happened to touch rdx, i.e. by luck, not by contract. A selector plus a
+# direct call carries both halves by construction. CHANGELOG [1.2.3].
+enum LatencyPreset {
+    LAT_PRESET_LOW_LATENCY = 0;
+    LAT_PRESET_CASUAL      = 1;
+}
+
 fn _now_ns() {
     var ts[16];
     syscall(228, 1, &ts);
@@ -28,23 +40,30 @@ fn _now_ns() {
 
 fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 
-# Run one playback with the given preset name + configurator fnptr.
+# Apply the selected preset. Direct calls, so the Result pair reaches the
+# caller intact.
+fn _apply_preset(preset_id, d, fmt): i64 {
+    if (preset_id == LAT_PRESET_CASUAL) { return vani_configure_casual(d, fmt); }
+    return vani_configure_low_latency(d, fmt);
+}
+
+# Run one playback with the given preset name + preset selector.
 # Returns 0 on success, 1 on failure.
-fn _run_preset(label, preset_fn) {
+fn _run_preset(label, preset_id) {
     _puts("--- ");
     _puts(label);
     _puts(" ---\n");
 
-    var ores = vani_open_playback(LAT_CARD, LAT_DEVICE);
-    if (is_ok(ores) == 0) { _puts("open: FAIL\n"); return 1; }
-    var d = payload(ores);
+    var ores_tag, ores = vani_open_playback(LAT_CARD, LAT_DEVICE);
+    if (is_ok(ores_tag) == 0) { _puts("open: FAIL\n"); return 1; }
+    var d = ores;
 
     var fmt = vani_format_default();
-    var cres = fncall2(preset_fn, d, fmt);
-    if (is_ok(cres) == 0) {
+    var cres_tag, cres = _apply_preset(preset_id, d, fmt);
+    if (is_ok(cres_tag) == 0) {
         _puts("preset configure: FAIL — ");
-        vani_err_print_name(vani_err_code(payload(cres)));
-        var det = vani_err_detail(payload(cres));
+        vani_err_print_name(vani_err_code(cres));
+        var det = vani_err_detail(cres);
         if (det != 0) {
             _puts(": ");
             sys_write(1, det, strlen(det));
@@ -57,8 +76,8 @@ fn _run_preset(label, preset_fn) {
     _puts(vani_state_name(vani_state_typed(d)));
     _puts("\n");
 
-    var pres = vani_prepare(d);
-    if (is_ok(pres) == 0) { _puts("prepare: FAIL\n"); vani_close(d); return 1; }
+    var pres_tag, pres = vani_prepare(d);
+    if (is_ok(pres_tag) == 0) { _puts("prepare: FAIL\n"); vani_close(d); return 1; }
     _puts("  state-after-prepare:   ");
     _puts(vani_state_name(vani_state_typed(d)));
     _puts("\n");
@@ -70,14 +89,14 @@ fn _run_preset(label, preset_fn) {
     memset(buf, 0, bytes);
 
     var t0 = _now_ns();
-    var play_res = vani_play(d, buf, frames);
+    var play_res_tag, play_res = vani_play(d, buf, frames);
     var t1 = _now_ns();
-    if (is_ok(play_res) == 0) {
+    if (is_ok(play_res_tag) == 0) {
         _puts("play: FAIL\n");
         vani_close(d);
         return 1;
     }
-    var written = payload(play_res);
+    var written = play_res;
     vani_drain(d);
     var t2 = _now_ns();
 
@@ -113,10 +132,10 @@ fn main() {
 
     var fail = 0;
     fail = fail + _run_preset("low-latency (10 ms × 4 = 40 ms buf)",
-      &vani_configure_low_latency);
+      LAT_PRESET_LOW_LATENCY);
     _puts("\n");
     fail = fail + _run_preset("casual (16 ms × 4 = 64 ms buf)",
-      &vani_configure_casual);
+      LAT_PRESET_CASUAL);
     _puts("\n");
     if (fail > 0) {
         _puts("LATENCY TEST FAIL\n");

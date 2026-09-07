@@ -49,12 +49,12 @@ fn main() {
     fmt_int(CAPS_DEVICE);
     _puts(" playback\n");
 
-    var res = vani_open_playback(CAPS_CARD, CAPS_DEVICE);
-    if (is_ok(res) == 0) {
+    var res_tag, res = vani_open_playback(CAPS_CARD, CAPS_DEVICE);
+    if (is_ok(res_tag) == 0) {
         _puts("open: FAIL\n");
         return 1;
     }
-    var d = payload(res);
+    var d = res;
     _puts("  open: OK\n");
 
     var hwp[608];
@@ -110,13 +110,13 @@ fn main() {
     # formats. Confirms the higher-level API works.
     _puts("\n  negotiating preferred 48k stereo S16_LE:\n");
     var pref = vani_format_default();
-    var nres = vani_format_negotiate(d, pref);
-    if (is_ok(nres) == 0) {
+    var nres_tag, nres = vani_format_negotiate(d, pref);
+    if (is_ok(nres_tag) == 0) {
         _puts("    NEGOTIATE FAIL\n");
         vani_close(d);
         return 1;
     }
-    var got = payload(nres);
+    var got = nres;
     _puts("    rate=");
     fmt_int(vani_format_rate(got));
     _puts(" ch=");
@@ -129,11 +129,11 @@ fn main() {
 
     _puts("\n  negotiating preferred 96k 8-channel S32_LE:\n");
     var pref2 = vani_format_new(96000, 8, 32, SND_PCM_FORMAT_S32_LE);
-    var nres2 = vani_format_negotiate(d, pref2);
-    if (is_ok(nres2) == 0) {
+    var nres2_tag, nres2 = vani_format_negotiate(d, pref2);
+    if (is_ok(nres2_tag) == 0) {
         _puts("    NEGOTIATE FAIL\n");
     } else {
-        var got2 = payload(nres2);
+        var got2 = nres2;
         _puts("    rate=");
         fmt_int(vani_format_rate(got2));
         _puts(" ch=");

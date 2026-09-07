@@ -5,7 +5,95 @@ All notable changes to Vani will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] — 2026-09-06
+
+### Fixed
+
+- **`vani_drain` / `vani_drop` / `vani_state` returned a Result on the error path and a bare
+  status int on the success path.** Under cyrius 6.6.0's value form a Result is a register PAIR,
+  so a caller destructuring these got a garbage second half on success, and a caller reading one
+  value got the TAG on failure. All three now wrap the success path in `vani_ok(...)`, so both
+  paths are pairs and the returned status survives as the payload. Found by 6.6.0's new
+  mixed-return diagnostic, which reports a fn that returns a pair on one path and a single value
+  on another — nothing else can see it, since both spellings are `return <i64>;`.
+
 ## [Unreleased]
+
+## [1.2.3] — 2026-09-07
+
+### Changed — cyrius 6.6.0 Result value form (BREAKING for `vani_result_unwrap`)
+
+Toolchain pin **6.5.32 → 6.6.0**. cyrius 6.6.0 declares `Result`, `Option` and
+`Either` as `: stack`, so a payload-carrying variant is now a REGISTER PAIR
+(tag in rax, payload in rdx) that allocates **zero bytes** — there is no heap
+box, and therefore no `tag at +0 / payload at +8` layout. Every vani function
+that returns a Result now returns a pair, and every caller must bind both
+halves.
+
+- **API BREAK — `vani_result_unwrap(res)` → `vani_result_unwrap(t, v)`.** The
+  only signature change in vani's public surface. `payload()` was deleted
+  upstream and has no one-argument replacement, so the tag and the value must
+  arrive as two arguments. Consumers calling it must update:
+
+  ```
+  var t, v = vani_open_playback(1, 0);
+  var d = vani_result_unwrap(t, v);
+  ```
+
+  `vani_ok`, `vani_err_result` and `vani_err_result_msg` keep their signatures
+  — they now return the pair. `is_ok(t)` takes the TAG and is unchanged, and
+  `is_ok(f())` stays correct because argument 1 receives rax, which is the tag.
+  The `VaniErr` struct itself is untouched: the Err payload is still a pointer
+  to the 16-byte `{code, detail}` record, so `vani_err_code` / `vani_err_detail`
+  are unchanged.
+
+- **Err propagation re-wraps.** `src/capture.cyr`, `src/playback.cyr` and
+  `src/device.cyr` forwarded a failed inner Result with `return res;`. Under the
+  value form `res` is only the PAYLOAD, so that returned the error pointer as
+  the TAG with an undefined payload — a silent corruption the compiler cannot
+  diagnose. These are now `return Err(res);`, which preserves the error pointer
+  exactly. Verified: re-returning a bound payload measured `tag=77 val=77` for
+  an `Err(77)`, against `tag=1 val=77` for the re-wrapped form.
+
+- **`programs/latency_test.cyr` no longer routes a Result through a fnptr.** It
+  selected its preset with `&vani_configure_low_latency` passed through
+  `fncall2`, whose hand-written asm stores only `rax`. The payload survived that
+  wrapper solely because nothing in its epilogue happened to touch `rdx` — luck,
+  not contract. Replaced with a `LatencyPreset` selector and direct calls.
+
+- **`programs/probe.cyr` / `programs/devices.cyr` read the raw state directly.**
+  `vani_state()` is a MIXED-return function — an Err pair on its `d == 0` guard,
+  a raw `i64` state otherwise — so `var st = vani_state(d);` is now refused.
+  On these paths `d` is non-null, so they call
+  `audio_get_state(vani_audio_handle(d))`, which is exactly what `vani_state()`
+  returned there, without the "is state 1 an Err?" ambiguity.
+
+- **Test suite migrated with every assertion preserved: 893/893, unchanged from
+  1.2.2.** No check was deleted, weakened, or rewritten to a looser expectation.
+  The suite asserted the boxed layout only through `payload()`, never through
+  hand-rolled `load64(r)` / `load64(r + 8)`, so the rewrite is mechanical: nested
+  `vani_err_code(payload(f(...)))` became a two-variable bind followed by the
+  same assertion on the payload, and `vani_result_unwrap(vani_ok(7))` became a
+  bind plus the two-argument call. `tests/bcyr/vani.bcyr` needed no change.
+
+- **No hand-rolled box reads existed to fix.** Every `load64(x)` / `load64(x+8)`
+  pair in `src/` projects one of vani's own structs — ring buffer, mixer handle,
+  device handle, format, `VaniErr` — not a Result box. Verified by grep.
+
+#### Upstream compiler gap found during this migration
+
+cyrius 6.6.0 refuses `var r = f();` for a pair-returning `f` — except for the
+**first such site in a compilation unit**, which is silently accepted and drops
+the payload. Minimal repro: three identical `var a = mixed(1);` binds flag lines
+2 and 3 but not line 1; with distinct callees the pattern holds, so it is
+first-per-unit, not first-per-callee. This bit vani twice — the `st0` binds in
+`probe.cyr` and `devices.cyr` compiled clean while the `st1` / `st2` binds right
+below them errored. **The compiler is not a sufficient authority for this
+migration; grep as well.** vani is swept clean of the shape either way (a
+sweep over all 29 Result-returning vani functions finds zero remaining
+single-variable binds, assignments or `store64` of a Result). Not fixed here —
+it is a cyrius defect and needs reporting against that repo.
+
 
 ### Changed — documentation sweep
 

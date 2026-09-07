@@ -1,9 +1,15 @@
 # @public — stable API surface
 # error.cyr — VaniErr codes + Result helpers
 #
-# Wraps tagged.cyr Result pattern: Ok(value) / Err(VaniErr ptr).
-# Consumers either unwrap with vani_result_unwrap or branch on
-# is_ok / payload directly.
+# Wraps result.cyr Result pattern: Ok(value) / Err(VaniErr ptr).
+#
+# v6.6.0 value form: every vani fn returning a Result returns a REGISTER
+# PAIR (tag, payload) and allocates nothing. Receive one with
+# `var t, v = vani_...();` — never a single-variable bind, which the
+# compiler now refuses. Consumers either unwrap with
+# `vani_result_unwrap(t, v)` or branch on `is_ok(t)` and use `v`
+# directly. Propagating an Err upward re-wraps: `return Err(v);`.
+# CHANGELOG [1.2.3].
 #
 # VaniErr struct layout (16 bytes):
 #   +0:  code    — VaniErrCode constant
@@ -100,9 +106,9 @@ fn vani_err_result_msg(code, msg): i64 {
     return Err(vani_err_new(code, msg));
 }
 
-fn vani_result_unwrap(res): i64 {
-    if (is_ok(res) == 1) { return payload(res); }
-    var e = payload(res);
+fn vani_result_unwrap(t, v): i64 {
+    if (is_ok(t) == 1) { return v; }
+    var e = v;
     var code = vani_err_code(e);
     sys_write(2, "vani error: ", 12);
     vani_err_print_name(code);
