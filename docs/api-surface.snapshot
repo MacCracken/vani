@@ -78,7 +78,7 @@ error::vani_observability_disable/0
 error::vani_observability_enable/0
 error::vani_observability_is_enabled/0
 error::vani_ok/1
-error::vani_result_unwrap/1
+error::vani_result_unwrap/2
 format::vani_alsa_for/2
 format::vani_bytes_per_frame/1
 format::vani_bytes_per_sample/1

@@ -5,17 +5,28 @@ All notable changes to Vani will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.4] — 2026-09-06
+## [1.2.4] — 2026-09-07
 
-### Fixed
+### Changed
 
-- **`vani_drain` / `vani_drop` / `vani_state` returned a Result on the error path and a bare
-  status int on the success path.** Under cyrius 6.6.0's value form a Result is a register PAIR,
-  so a caller destructuring these got a garbage second half on success, and a caller reading one
-  value got the TAG on failure. All three now wrap the success path in `vani_ok(...)`, so both
-  paths are pairs and the returned status survives as the payload. Found by 6.6.0's new
-  mixed-return diagnostic, which reports a fn that returns a pair on one path and a single value
-  on another — nothing else can see it, since both spellings are `return <i64>;`.
+- **Toolchain pin 6.5.32 → 6.6.0**, and `src/` migrated to the Result/Option/Either **value
+  form**: `Ok(v)` / `Err(e)` return a `(tag, payload)` register pair and allocate zero bytes.
+  Helper arities changed accordingly (`vani_result_unwrap` 1 → 2 arguments); `docs/
+  api-surface.snapshot` re-baselined for that one signature.
+
+### Notes
+
+- ⚠ **`vani_drain` / `vani_drop` / `vani_state` are UNCHANGED, and deliberately so.** They return
+  `Err(VANI_ERR_DEVICE_INVALID)` for a null device and the **raw ALSA status** otherwise — which
+  cyrius 6.6.0's new mixed-return diagnostic reports as "returns a pair on one path and a single
+  value on another". Here that is the intended contract, not a defect, and it is pinned from both
+  sides: `assert_eq(is_ok(vani_drain(0)), 0)` and `assert_lt(vani_drain(bad_fd), 0, "drain
+  propagates the raw negative")`. Both hold because argument 1 receives rax — the Err tag on one
+  path, a signed status on the other.
+
+  An earlier cut of this release "fixed" the warning by wrapping the raw path in `vani_ok(...)`.
+  That broke three tests (`got 0, expected -1`) and was reverted: the diagnostic is advisory, and
+  silencing it here would have changed a documented, tested API to quiet a compiler note.
 
 ## [Unreleased]
 
