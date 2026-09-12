@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.5] — 2026-09-12
+
+### Changed
+
+- **Toolchain `6.6.0` → `6.6.2`.** No source change: this repo was already on the
+  value form, so the flip cost it nothing. Re-verified on every surface it ships —
+  build, tests, and any bench/fuzz/distlib target, including every
+  `[lib.<profile>]` bundle.
+
+
 ## [1.2.3] — 2026-09-07
 
 ### Changed — cyrius 6.6.0 Result value form (BREAKING for `vani_result_unwrap`)
