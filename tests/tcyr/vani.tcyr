@@ -2549,13 +2549,46 @@ fn _test_fifo_path(buf) {
 }
 
 # mkfifo(path) mode 0600, as mknod(path, S_IFIFO | 0600, 0); S_IFIFO |
-# 0600 = 0010600 = 4480. x86_64 has mknod #133; aarch64 only mknodat #33,
-# relative to AT_FDCWD (-100).
+# 0600 = 0010600 = 4480. x86_64 has mknod #133.
+#
+# aarch64 has only mknodat #33, and cyrius 6.6.6 has no way to issue it:
+# since 6.6.5 the aarch64 backend rewrites a literal syscall(33, ...) to
+# dup3, the peer of x86 dup2 #33 (measured under qemu-aarch64: dup3(-100,
+# path, 0) = -EBADF, so mkfifo "got -9"), and the stdlib has neither a
+# SYS_MKNODAT nor a sys_mknodat. cyrius 6.6.8 adds sys_mknodat. Until vani
+# pins it, the FIFO tests are SKIPPED on aarch64 — counted, named and
+# reported after the summary by _test_skip, never a silent pass. This arm
+# is not reached (see _test_fifo_skipped) and fails if it ever is.
 fn _test_mkfifo(path) {
     #ifdef CYRIUS_ARCH_AARCH64
-    return syscall(33, 0 - 100, path, 4480, 0);
+    return 0 - 38;
     #else
     return syscall(133, path, 4480, 0);
+    #endif
+}
+
+# Tests skipped on this target. Each skip prints a SKIP line naming the
+# test and the reason, and main() reports the count after the summary.
+var _test_skips = 0;
+
+fn _test_skip(name, why) {
+    syscall(1, 1, "  SKIP: ", 8);
+    syscall(1, 1, name, strlen(name));
+    syscall(1, 1, " (", 2);
+    syscall(1, 1, why, strlen(why));
+    syscall(1, 1, ")\n", 2);
+    _test_skips = _test_skips + 1;
+    return 0;
+}
+
+# 1 when the FIFO tests cannot run on this target (the skip is recorded
+# under `name`), else 0. See _test_mkfifo for why aarch64 skips.
+fn _test_fifo_skipped(name) {
+    #ifdef CYRIUS_ARCH_AARCH64
+    _test_skip(name, "aarch64: no mknodat on cyrius 6.6.6; cyrius 6.6.8 adds sys_mknodat");
+    return 1;
+    #else
+    return 0;
     #endif
 }
 
@@ -2602,6 +2635,7 @@ fn _test_make_fifo(path) {
 }
 
 fn test_open_pcm_fails_at_once_when_busy() {
+    if (_test_fifo_skipped("test_open_pcm_fails_at_once_when_busy") == 1) { return 0; }
     var path[64];
     if (_test_make_fifo(&path) == 0) { return 0; }
     # Nothing has the FIFO open for reading, so a blocking O_WRONLY open
@@ -2618,6 +2652,7 @@ fn test_open_pcm_fails_at_once_when_busy() {
 }
 
 fn test_open_pcm_returns_blocking_fd() {
+    if (_test_fifo_skipped("test_open_pcm_returns_blocking_fd") == 1) { return 0; }
     var path[64];
     if (_test_make_fifo(&path) == 0) { return 0; }
     # The first open below would sleep if the helper opened without
@@ -2864,7 +2899,12 @@ fn main() {
     # failure rather than the count itself: an exit status is 8 bits, so
     # 256 failures would wrap to a pass, and `cyrius test` reads any
     # status above 128 as a signal death.
-    if (assert_summary() > 0) { return 1; }
+    var failed = assert_summary();
+    if (_test_skips > 0) {
+        fmt_int(_test_skips);
+        syscall(1, 1, " test(s) skipped on this target (SKIP lines above)\n", 51);
+    }
+    if (failed > 0) { return 1; }
     return 0;
 }
 

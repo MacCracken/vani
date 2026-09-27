@@ -7,6 +7,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.7] — 2026-09-27
+
+### Fixed
+
+- **Both bundles compile for Windows (PE) again.** 1.2.6's `_audio_open_pcm` guarded its
+  `F_GETFL` / `F_SETFL` sequence with an `#else` that excluded only agnos, so a PE build hit
+  `SYS_FCNTL`, and `O_NONBLOCK` in the core profile, neither of which the Windows syscall peer
+  defines. `dist/vani.cyr` (with patra + yukti) failed with 2 errors and `dist/vani-core.cyr`
+  with 4; 1.2.5 built for PE. `_audio_open_pcm` now has a `CYRIUS_TARGET_WIN` arm beside the
+  agnos one that returns -1, so on Windows both opens return the null handle, as they did in
+  practice before (Windows has no ALSA and no `/dev/snd`). This is the same fix sigil 3.12.14
+  made for the same missing `SYS_FCNTL`. With the 6.6.6 toolchain both bundles now build for PE
+  with 0 raw `syscall` instructions (objdump), and a PE smoke run under wine returns the null
+  handle. Folding 1.2.6 into cyrius would have turned its `pe_no_raw_syscall_bytes` gate red
+  (axis 4, patra + yukti + vani).
+
+- **The agnos build no longer depends on yukti's placeholder `SYS_IOCTL`.** The agnos syscall
+  peer defines no ioctl number, and the mixer's control ioctls (`src/mixer.cyr`) are compiled
+  for agnos. They compiled only because yukti up to 2.3.11 set `SYS_IOCTL = 9001` in its agnos
+  arm. yukti 2.3.12 deletes that, and with it `dist/vani.cyr` stopped building for agnos
+  (`undefined variable 'SYS_IOCTL'`). Every ALSA ioctl in vani, all 13 PCM sites and all 7
+  control sites, now goes through a private `_audio_ioctl` in `src/alsa.cyr`. It returns
+  `-ENOSYS` (-38) on agnos and is the same `syscall(SYS_IOCTL, …)` everywhere else, so the Linux
+  path is unchanged (909/909). The agnos control sites stay unreachable: `vani_mixer_open` fails
+  closed there. It is the pattern of yukti's own `_yk_ioctl`, kept inside vani so it builds on
+  the released cyrius 6.6.6, which has no agnos `sys_ioctl`. Both bundles build for agnos with
+  either yukti (2.3.11, as bundled in 6.6.6, and 2.3.12).
+
+- **Test suite: the two named-FIFO tests are an explicit, counted skip on aarch64.** On cyrius
+  6.6.6 the aarch64 suite gave 898 passed and 2 failed (`FAIL: mkfifo (got -9, expected 0)`), where 6.6.2
+  gave 909/909. `_test_mkfifo` issued aarch64 `mknodat` as the literal `syscall(33, …)`, and
+  since cyrius 6.6.5 the aarch64 backend rewrites 33 to `dup3`, the peer of x86 `dup2` #33 (under
+  qemu-aarch64: `dup3(-100, <path>, 0) = -EBADF`). The compiler gives no diagnostic, and 6.6.6 has
+  no correct spelling of the call: no `SYS_MKNODAT`, no `sys_mknodat`. cyrius 6.6.8 adds
+  `sys_mknodat`; until vani pins it, `test_open_pcm_fails_at_once_when_busy` and
+  `test_open_pcm_returns_blocking_fd` print a `SKIP:` line naming the test and the reason, and
+  `main()` reports the count after the summary. A skip never counts as a pass. The aarch64
+  suite is now 898/898, 0 failed, exit 0, with `2 test(s) skipped`. The 11 assertions those
+  tests hold still run on x86_64 (909/909). The aarch64 arm of `_test_mkfifo` no longer issues
+  any syscall. vani's CI would not have caught this, because it cross-builds aarch64 but does
+  not run the aarch64 suite.
+
+### Changed
+
+- **Toolchain pin `6.6.2` → `6.6.6`.**
+
+### Verified
+
+- On cyrius 6.6.6: `cyrius test` 909/909 (x86_64); the aarch64 suite under qemu-aarch64 898/898
+  with 2 counted skips; lint 0 warnings (1 note, unchanged); `fmt --check` and `vet` clean; API
+  surface 109 / 25, unchanged; both `.deps` sidecars unchanged (21 / 3 leaves; the new comments
+  were checked against the distlib comment-word issue); `cyrius distlib` and `distlib core` are
+  reproducible, and a second run is byte-identical. All 10 programs build.
+- Bundle compile matrix on the 6.6.6 toolchain: `dist/vani.cyr` (behind vani's own stdlib
+  preamble, and behind cyrius's PE-gate preamble of syscalls + patra + yukti) and
+  `dist/vani-core.cyr` (syscalls + string + alloc) build for x86_64 Linux, aarch64 Linux
+  (`cycc_aarch64`), agnos, PE (the in-tree emitter, and `cycc_win` under wine with
+  byte-identical output), Mach-O x86 and Mach-O arm64. The x86_64, aarch64 (qemu) and PE (wine)
+  probes run and get the null handle from `audio_open_playback`. The Mach-O "not routed"
+  warnings come from the stdlib and appear the same without vani.
+
+### Notes
+
+- **Corrections to 1.2.6.** "909/909 … on aarch64 under qemu-user" held on 6.6.2 only, and
+  "passes 909/909 under cyrius 6.6.6" held on x86_64 only. See Fixed above.
+- Both bundles grow by ~0.9 KB (core 49,899 → 50,784 B, full 113,560 → 114,403 B). Most of the
+  growth is the new comments; call sites shrink.
+
 ## [1.2.6] — 2026-09-27
 
 ### Fixed
