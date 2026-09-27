@@ -2587,11 +2587,23 @@ fn test_open_flag_literals() {
     return 0;
 }
 
+# Creates this process's FIFO at `path`; returns 1, or asserts and returns
+# 0 on failure. Callers must not open the path unless this returned 1:
+# the name is predictable, so if mknod fails something else may be there
+# — a planted symlink, say — and opening it would open that. /tmp is
+# sticky, so once mknod succeeds nobody else can swap the FIFO out.
+fn _test_make_fifo(path) {
+    _test_fifo_path(path);
+    sys_unlink(path);
+    var r = _test_mkfifo(path);
+    assert_eq(r, 0, "mkfifo");
+    if (r != 0) { return 0; }
+    return 1;
+}
+
 fn test_open_pcm_fails_at_once_when_busy() {
     var path[64];
-    _test_fifo_path(&path);
-    sys_unlink(&path);
-    assert_eq(_test_mkfifo(&path), 0, "mkfifo");
+    if (_test_make_fifo(&path) == 0) { return 0; }
     # Nothing has the FIFO open for reading, so a blocking O_WRONLY open
     # of it would sleep — the stand-in for a busy PCM.
     _test_watchdog(10);
@@ -2607,9 +2619,7 @@ fn test_open_pcm_fails_at_once_when_busy() {
 
 fn test_open_pcm_returns_blocking_fd() {
     var path[64];
-    _test_fifo_path(&path);
-    sys_unlink(&path);
-    assert_eq(_test_mkfifo(&path), 0, "mkfifo");
+    if (_test_make_fifo(&path) == 0) { return 0; }
     # The first open below would sleep if the helper opened without
     # O_NONBLOCK: a blocking O_RDONLY open of a FIFO waits for a writer.
     _test_watchdog(10);

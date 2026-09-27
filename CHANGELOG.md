@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.6] — 2026-09-27
+
 ### Fixed
 
 - **A busy PCM no longer hangs `audio_open_playback` / `audio_open_capture`.** Both opened
@@ -59,7 +61,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open has a busy PCM's shape (with no reader a blocking open sleeps, `O_NONBLOCK` fails at once
   with `-ENXIO`) under a 10 s SIGALRM watchdog; the returned fd blocking, with its access mode
   intact, in both directions. A `pipe()` stand-in was tried first and proves nothing: the kernel
-  skips that `-ENXIO` for an anonymous pipe reopened through `/proc/self/fd`.
+  skips that `-ENXIO` for an anonymous pipe reopened through `/proc/self/fd`. The FIFO's `/tmp`
+  name is predictable, so a test opens it only after its own `mknod` succeeded — never a file
+  someone else put there (release audit L-1).
 
 ### Verified
 
@@ -79,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leaves); smoke builds on x86_64, aarch64 and agnos. At the time, the suite's 2 FAILs above
   still exited 0, because `main()` discarded the failure count — fixed in this release (see
   Fixed).
+- **Release security pass** —
+  [`docs/audit/2026-09-27-v1.2.6-audit.md`](docs/audit/2026-09-27-v1.2.6-audit.md). The new
+  open sequence reviewed (no descriptor leaks on any error path, no external data in the flags).
+  UAPI re-pinned: 18 ioctl numbers and 14 constants compiled from the 7.2 release headers, 0
+  mismatches, and identical against mainline 7.3-rc4. CVE window 2026-08-20 → 2026-09-27: 81
+  NVD records for ALSA / ASoC, none that vani could mitigate. One is reachable through a close
+  vani must make (CVE-2026-90198, a UAF on card unbind); one needs `mmap`, which vani never
+  does, and is a local privilege escalation on the host (CVE-2026-98116). Both need a kernel
+  update. Downstream: cyrius-polyomino, cyrius-doom, cyrius-bb and mishran build with the 1.2.6
+  core swapped in, and polyomino / doom / bb pass their suites (277 / 376 / 253). The tree also
+  builds and passes 909/909 under cyrius 6.6.6.
 
 ### Notes
 

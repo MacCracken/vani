@@ -10,35 +10,35 @@
 
 | Field | Value |
 |-------|-------|
-| Current version | `1.2.2` (stable — **patch**: structural close-out of the 1.2.0 P(-1) sweep. Recovery-policy seam ([ADR 0004](../adr/0004-recovery-policy-seam.md)), `snd_interval` open/empty flags honoured, 100% reference coverage. No API change, pin unchanged) |
-| Released | 2026-08-20 |
-| Cyrius toolchain pin | `6.5.32` |
+| Current version | `1.2.6` (stable — **patch**: a busy PCM no longer hangs `audio_open_*` — open `O_NONBLOCK`, clear it before the first PREPARE ([ADR 0005](../adr/0005-nonblocking-pcm-open.md)); the test suite's exit status is now a real CI gate. No public API change, pin unchanged) |
+| Released | 2026-09-27 |
+| Cyrius toolchain pin | `6.6.2` (1.2.6 also verified under `6.6.6`, the roadmap's next pin) |
 | Dependency model | **all-stdlib** — no git overrides, no `cyrius.lock`. `yukti` + `patra` (and patra's transitive `atomic` / `sync` / `thread_local`) are stdlib modules as of the 0.9.9 all-stdlib cut. **The pin is the supply chain**: `cyrius build` resolves `include "lib/…"` from `$CYRIUS_HOME/versions/<pin>/lib`, *not* from the vendored `./lib/` — established by the 1.1.2 audit (canary in `lib/alloc.cyr`) and re-confirmed at 1.1.4 by a deliberate syntax error in `./lib/tagged.cyr` that the build sailed past, byte-identical. `./lib/` is editor/IDE support and the source of the `shadows version-pinned` warning only |
-| Distribution profiles | full (`dist/vani.cyr`, 109,765 B / **109** symbols) and core (`dist/vani-core.cyr`, 46,459 B / **25** symbols) |
+| Distribution profiles | full (`dist/vani.cyr`, 113,560 B / **109** symbols) and core (`dist/vani-core.cyr`, 49,899 B / **25** symbols) |
 | API surface baseline | `docs/api-surface.snapshot` (**109** public fns) — `cyrius_api_surface --scope=project` reports "surface matches snapshot exactly"; `docs/api-surface.core.snapshot` (**25**). Grew by exactly one additive fn at 1.2.0 (`audio_set_params_fmt`), which is why 1.2.0 is a minor. **Now gated in CI** — the gate was verified to exit 1 on both a removal and an arity change |
-| Latest audit | [`docs/audit/2026-08-20-v1.2.2-audit.md`](../audit/2026-08-20-v1.2.2-audit.md) — structural close-out. Priors: [`v1.2.1`](../audit/2026-08-20-v1.2.1-audit.md) (code-level tail), [`v1.2.0`](../audit/2026-08-20-v1.2.0-audit.md) (the sweep — 5 lenses + adversarial verification, 50 of 55 findings re-rated) |
+| Latest audit | [`docs/audit/2026-09-27-v1.2.6-audit.md`](../audit/2026-09-27-v1.2.6-audit.md) — release pass: the new open sequence, UAPI re-pinned against the 7.2 headers and 7.3-rc4 (0 mismatches), CVE window 2026-08-20 → 2026-09-27 (81 NVD records, none vani can mitigate). 1.2.3-1.2.5 shipped without audit docs; this one covers their window. Priors: [`v1.2.2`](../audit/2026-08-20-v1.2.2-audit.md) (structural close-out), [`v1.2.1`](../audit/2026-08-20-v1.2.1-audit.md) (code-level tail), [`v1.2.0`](../audit/2026-08-20-v1.2.0-audit.md) (the sweep — 5 lenses + adversarial verification, 50 of 55 findings re-rated) |
 | Architectures supported | x86_64-linux, aarch64-linux (since 0.9.0); agnos target builds clean (not a CI leg) |
 
 ## Test / Bench Counts
 
 | Metric | Value |
 |--------|-------|
-| CPU test assertions | **893** (259 at 1.1.4, 775 at 1.2.0, 778 at 1.2.1). Reference coverage **100%** — 109/109 fns, 8/8 files, up from 36/108 and 5/8 at 1.1.4. All 140 `src` functions are genuinely *called* from tests, not merely mentioned (`cyrius coverage` counts a mention). Every 1.2.0 repair ships a regression assertion, and the load-bearing ones were validated with negative controls (see CHANGELOG) |
+| CPU test assertions | **909** (259 at 1.1.4, 775 at 1.2.0, 778 at 1.2.1, 893 at 1.2.2). **The exit status gates CI since 1.2.6** — through 1.2.5 `main()` discarded the failure count, so no assertion could fail CI. Reference coverage **100%** — 109/109 fns, 8/8 files (re-checked at 1.2.6), up from 36/108 and 5/8 at 1.1.4. All 140 `src` functions are genuinely *called* from tests, not merely mentioned (`cyrius coverage` counts a mention). Every 1.2.0 repair ships a regression assertion, and the load-bearing ones were validated with negative controls (see CHANGELOG) |
 | CPU benchmarks | 13 (format / ring / hwp / negotiate paths) |
-| Real-HW programs | 9 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`, `busy_open`) plus `vanitone` (agnos bring-up) — 10 build targets, all clean. `busy_open` is unreleased ([Unreleased] in CHANGELOG) |
+| Real-HW programs | 9 (`smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`, `busy_open`) plus `vanitone` (agnos bring-up) — 10 build targets, all clean. `busy_open` added at 1.2.6 |
 | Bench history baseline | commit `e031c0d` (2026-04-30 v0.1.0); latest row 2026-08-20 (v1.2.1). **Read cross-row comparisons with care** — the file has no column for measurement session, and the 1.2.1 row was taken on a machine running ~8% slower than the 1.2.0 row: `ring_200ms_playback` reads 91.6 µs vs 84.8 µs on *byte-identical* code. The sound method is a same-session A/B against the previous tag, which for 1.2.1 showed the new range guards cost nothing measurable (`hwp_mask_set_value` 21 vs 21 ns, `hwp_init_any` 1,030 vs 1,008-1,042, `hwp_interval_set_exact` +1 ns). |
 
 ## Build Artifacts
 
 | Artifact | Size | Notes |
 |----------|------|-------|
-| `dist/vani.cyr` (full profile) | 109,765 B (v1.2.2) | Full consumer-facing bundle: **109** public symbols. Grew from 1.1.4's 83,005 B — the 1.2.0 repairs plus the explanatory comment blocks each one carries. |
-| `dist/vani-core.cyr` (core profile) | 46,459 B (v1.2.2) | Playback-only single-module bundle from `src/alsa.cyr`: **25** `audio_*` symbols (gained `audio_set_params_fmt`). |
-| `build/vani_smoke` (DCE) | **515,432 B** (v1.2.2, cyrius 6.5.32) | x86_64 ELF link-check binary. Was 506,816 B at 1.1.4 — **+8,504 B**, entirely vani's own hardening (the pin bump is provably inert: byte-identical stdlib, byte-identical binary). |
-| `build/vani_smoke-aarch64` | **744,536 B** (v1.2.0) | aarch64 ELF link-check binary — valid stripped ARM aarch64 ELF. Was 744,232 B. |
-| `build/vani_smoke-agnos` | **494,032 B** (v1.2.0) | agnos target (`--agnos`, not a CI leg), zero warnings. Was 489,624 B. |
-| `dist/vani.deps` / `dist/vani-core.deps` | 21 / 4 stdlib leaves | Unchanged at 1.2.0 — the release adds no stdlib dependency. |
-| All 9 programs | 485-516 KB | `smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`, `vanitone` — all build with zero warnings. |
+| `dist/vani.cyr` (full profile) | 113,560 B (v1.2.6) | Full consumer-facing bundle: **109** public symbols. +3,440 B over 1.2.5 (110,120 B): the busy-open helper, nearly all of it its explanation. Was 83,005 B at 1.1.4. |
+| `dist/vani-core.cyr` (core profile) | 49,899 B (v1.2.6) | Playback-only single-module bundle from `src/alsa.cyr`: **25** `audio_*` symbols. +3,440 B over 1.2.5 (46,459 B), same cause. |
+| `build/vani_smoke` (DCE) | **118,464 B** (v1.2.6, cyrius 6.6.2) | x86_64 ELF link-check binary. 1.2.5 at the same pin is 118,448 B, so 1.2.6 costs +16 B; the drop from 1.2.2's 515,432 B (cyrius 6.5.32) is the toolchain, not vani. |
+| `build/vani_smoke-aarch64` | **810,520 B** (v1.2.6, cyrius 6.6.2) | aarch64 ELF link-check binary — valid stripped ARM aarch64 ELF. Was 744,536 B at 1.2.0 (cyrius 6.5.32). The 1.2.6 test suite also runs 909/909 as an aarch64 build under qemu-user. |
+| `build/vani_smoke-agnos` | **117,704 B** (v1.2.6, cyrius 6.6.2) | agnos target (`--agnos`, not a CI leg). Was 494,032 B at 1.2.0 (cyrius 6.5.32). |
+| `dist/vani.deps` / `dist/vani-core.deps` | 21 / 3 stdlib leaves | Unchanged at 1.2.6. (This row said 21 / 4 through 1.2.2; the committed core sidecar lists 3 — `syscalls`, `string`, `alloc`.) Words in `src/alsa.cyr` comments can inflate the core sidecar and the drift gate will not notice — [`architecture/002`](../architecture/002-distlib-deps-counts-comment-words.md). |
+| All 10 programs | 480-535 KB | `smoke`, `probe`, `play_tone`, `caps`, `throughput`, `mixer_test`, `latency_test`, `devices`, `busy_open`, `vanitone` — all build. The only warnings are the three documented `vani_drain` / `vani_drop` / `vani_state` mixed-return notes from `src/device.cyr` (CHANGELOG 1.2.4 Notes). |
 
 ## Toolchain / CI Notes
 
@@ -46,10 +46,10 @@
 |------|-------|
 | CI format gate | **Fixed at 1.1.4.** The step ran `diff <(cyrius fmt "$f") "$f"`, correct through 1.1.3. In the 6.5.6–6.5.31 window `cyrius fmt <file>` changed to format **in place** and print nothing, so the gate compared an empty stream against every file — guaranteed red, and on a writable checkout it silently rewrote sources. Now `cyrius fmt <file> --check` (exit 0/1, writes nothing). **Do not substitute the bare `cyrfmt --check` binary** — it reported CLEAN on the same six files `cyrius fmt --check` correctly flagged, so it is the weaker check. |
 | CI lint gate | Extended at 1.1.4 to fail on `N untracked deferrals` as well as `warn ` lines. cyrlint exits 0 on deferrals, so the gate has to catch them. vani's one hit (`src/alsa.cyr`, a stale "filed as audit follow-up" sentence for work closed at 0.3.0) is closed; the file now cross-references `docs/audit/2026-04-30-audit.md`. |
-| cyrlint surface | **Byte-identical between 6.5.5 and 6.5.31** on vani's sources (2 `sys_open` notes, 1 deferral, 0 warnings under both) — this bump adds no new lint surface. The deferral class predates 6.5.5; closing it at 1.1.4 is cleanup, not toolchain-forced. |
-| api-surface check | `cyrius_api_surface --scope=project` → 108, matches snapshot exactly. **Still not wired into CI** — the v1.0.0 SemVer freeze is enforced by hand. Filed P2. |
+| cyrlint surface | 0 warnings, 0 untracked deferrals, **1 note** at 1.2.6 (`src/mixer.cyr:97`, the declined `xopen` adoption). The two `alsa.cyr` `raw sys_open w/ literal flags` notes went with the 1.2.6 open rewrite. (Byte-identical between 6.5.5 and 6.5.31, per the 1.1.4 audit.) |
 | Open P1 | *None.* The 1.1.4 P1 (`enum AlsaHwParam` +2 off the UAPI) was **fixed at 1.2.0** along with the regression assertions that would have caught it. |
 | api-surface CI gate | **Closed at 1.2.0** — `cyrius_api_surface --scope=project` now runs in CI, verified to exit 1 on a removal and on an arity change. |
+| CI test gate | **Fixed at 1.2.6.** `tests/tcyr/vani.tcyr` `main()` returned 0 whatever `assert_summary()` reported, so the Test step could fail only on a crash or signal. It now returns 1 on any failure — not the count: an exit status is 8 bits, and `cyrius test` reads anything above 128 as a signal death (measured: 139 failures reported as SIGSEGV, 256 as a pass). |
 
 ## Real-HW Verification
 
@@ -61,7 +61,7 @@
 | **Enumerator re-check (1.1.4)** | 8 PCM endpoints across cards 0/1/2 | `vani_devices` under **yukti 2.3.8** enumerates all 8 endpoints, matching the documented baseline **exactly** — same cards, devices, directions, drivers, names and `hw_id`s (`pci:0000:04:00.6:dev{0,2}` ALC897 ×3, `pci:0000:04:00.1:dev{3,7,8,9}` HDMI 0-3, `card2_dev0_c` acp). The yukti 2.3.2 → 2.3.8 bump does not disturb discovery. PCM open returned the documented non-session EACCES — the `/dev/snd/*` nodes are `root:audio` and the logind ACL grants `sddm`, not this shell — and **all 8 programs degraded closed with no crash**: `devices`/`probe` exit 1 with `open: FAIL`, `caps`/`throughput`/`mixer_test`/`latency_test` print `open: FAIL` and exit 0. Unchanged behavior, not a regression. |
 | **Consumer audible** (cyrius-doom 0.30.5) | card 1 device 0 (ALC897) | **First audible real-HW consumer** (2026-06-29): DOOM SFX play end-to-end through vani at S16_LE / stereo / 44100 |
 | **Consumer sink** (mishran 0.4.1) | card 1 device 0 | `pump_probe` **verified on real HW** (2026-07-06, remote session): router → vani sink open → pump → drain clean. mishran 0.4.1 adds `msh_router_pump_nb` over `audio_write_nb`/`audio_avail`. ⛔ **RETRACTED 2026-08-03** — this row previously claimed "a **non-silent** two-proc tone proven on agnos QEMU (RMS 2146)". That was a **FALSE GREEN**, produced by the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment (the only reason the client's loopback TCP connect could match a 4-tuple on agnos); the hook and its smoke are deleted. **The real-HW `pump_probe` result above is unaffected and stands.** `audio_write_nb` / `audio_avail` themselves are sound and unchanged — they simply have no valid agnos multi-proc demonstration, which must be re-established over the agnos socket (`anu`). See agnos `docs/development/planning/ipc.md` §9-§10. |
-| **Busy-PCM open** (2026-09-26, unreleased fix) | card 1 device 0 playback (ALC897, one subdevice), kernel 7.2.6 | With a second process holding `pcmC1D0p`, 1.2.5's `audio_open_playback` slept until `timeout 5` killed it; the fix returns 0 in 71 µs. `vani_busy_open`: 16/16 playback checks pass (blocking WRITEI / DRAIN, including after XRUN → PREPARE). `probe`, `caps`, `throughput`, `latency_test` pass through the new open. Silent only. **Capture half not run** — this shell had an ACL on `pcmC1D0p` alone. Kernel measurements: [`architecture/001`](../architecture/001-pcm-open-nonblock.md). |
+| **Busy-PCM open** (2026-09-26, 1.2.6) | card 1 device 0 playback (ALC897, one subdevice), kernel 7.2.6 | With a second process holding `pcmC1D0p`, 1.2.5's `audio_open_playback` slept until `timeout 5` killed it; the fix returns 0 in 71 µs. `vani_busy_open`: 16/16 playback checks pass (blocking WRITEI / DRAIN, including after XRUN → PREPARE). `probe`, `caps`, `throughput`, `latency_test` pass through the new open. Silent only. **Capture half not run** — this shell had an ACL on `pcmC1D0p` alone. Kernel measurements: [`architecture/001`](../architecture/001-pcm-open-nonblock.md). |
 
 | Hardware class | status | Tracked in |
 |----------------|--------|------------|
@@ -73,7 +73,8 @@
 
 | Item | Target | Notes |
 |------|--------|-------|
-| Busy-PCM open fix | next release | `audio_open_*` open `O_NONBLOCK` and clear it before the first PREPARE ([ADR 0005](../adr/0005-nonblocking-pcm-open.md)). In CHANGELOG `[Unreleased]`. The capture half of `vani_busy_open` still needs a run with an ACL on `pcmC1D0c`. Consumers pick it up by re-vendoring; polyomino can then drop `audio_probe_playback`. |
+| Capture half of `vani_busy_open` on hardware | opportunistic | Needs an ACL on `pcmC1D0c` (`sudo setfacl -m u:$USER:rw /dev/snd/pcmC1D0c`). The playback half ran at 1.2.6; the capture direction is covered by the CPU suite only. |
+| `O_CLOEXEC` on PCM / control descriptors | P2 | 1.2.6 audit L-2 — a forked-and-exec'd child inherits the fd and keeps the PCM busy. See roadmap. |
 | Audible real-HW round-trip at 1.1.4 | opportunistic | `vani_devices` re-confirmed enumeration under yukti 2.3.8, but every PCM open on this box currently returns EACCES (logind ACL grants `sddm`, not this shell), so no tone was pushed at 1.1.4. The last audible confirmation is cyrius-doom 0.30.5 (2026-06-29). Re-run `./build/vani_tone` from inside a desktop audio session when convenient. |
 | USB + HDMI real-HW round-trip | post-1.0 (HW-gated) | The v1.0 freeze criterion #1 residual. Same frozen code path as onboard HDA; verification needs USB-class / HDMI hardware access. Does **not** touch the frozen API. |
 | ~~`snd_pcm_status` comment vs pinned table~~ | **done 1.2.0** | Buffer narrowed 192 → 152, `AlsaPcmStatusLayout` enum added, `load64` → `load32` on the u32 `state` field, and an assertion ties the ioctl's size bits to the constant. |
@@ -82,13 +83,14 @@
 
 ## Downstream Consumers
 
-> **Every vendoring consumer is behind.** doom carries vani 1.1.2,
-> mishran 1.1.0, polyomino and bb 0.9.9 — so none of them has the 1.2.x
-> fixes (S24_LE frame stride, the format that never reached the kernel,
-> the mixer count bounds, the null-handle guards). They vendor
-> `dist/vani-core.cyr` by copy, so picking those up is a deliberate
-> re-vendor on their side, not something a vani release pushes. All four
-> were verified to **rebuild clean** against 1.2.x during the sweep.
+> **No vendoring consumer has 1.2.6 yet.** doom, polyomino and bb
+> carry vani 1.2.5 and mishran 1.2.2, so none has the busy-PCM open fix.
+> They vendor `dist/vani-core.cyr` by copy, so picking it up is a
+> deliberate re-vendor on their side, not something a vani release
+> pushes. Verified at 1.2.6 on scratch copies: all four **build** with the
+> 1.2.6 core swapped in, and polyomino (277), doom (376) and bb (253) pass
+> their suites; mishran has no `.tcyr` files. Once polyomino re-vendors,
+> its `audio_probe_playback` workaround can go.
 >
 > v1.0.0 froze the **full `vani_*` surface** under SemVer. The full
 > ring/capture/playback/device/format surface is live-consumer
@@ -100,11 +102,11 @@
 
 | Project | Status | Notes |
 |---------|--------|-------|
-| **dhvani** | **live — FULL `vani_*` surface** | Released **2.2.1**. `src/playback.cyr` bridges dhvani's f64 AudioBuffer ↔ vani's interleaved S16/S24/S32 PCM, exercising the full device path: `vani_open_playback` / `vani_open_capture`, `vani_ring_new` / `_write` / `_read`, `vani_play` / `vani_play_from_ring`, `vani_record` / `_record_to_ring`, `vani_configure`, `vani_format_new`, `vani_alsa_for`, `vani_start`, `vani_close`. References vani through functions only, so it DCE-prunes for vani-free consumers. **This is the consumer that unblocks the full-surface 1.0 freeze.** |
-| cyrius-doom | **live + audibly verified on real HW** — core profile | Released **0.35.4** (tagged; vendors vani **1.1.2**). DOOM SFX route through `audio_write` in the 35 Hz `audio_tick` loop; audible at S16/stereo/44100 (2026-06-29). Deepest core exerciser: `audio_set_params_full` (period/buffer) + `audio_set_sw_params` + an `audio_open_capture` codec probe. Vendors `vendor/vani-core.cyr`. |
-| cyrius-polyomino | **live** — core profile | Released **0.5.2** (tagged; vendors vani **0.9.9**). Piece-lock / line-clear / level-up / top-out SFX → `audio_write`. 6 `audio_*` symbols. |
-| cyrius-bb | **live** — core profile | Released **0.8.1** (tagged; vendors vani **0.9.9**). Brick/wall/paddle + lost/over/fanfare SFX → `audio_write_bytes`. 6 `audio_*` symbols. |
-| **mishran** | **live — core sink (real-HW verified; two-proc agnos claim RETRACTED)** | **0.5.4** (released; vendors vani **1.1.0**). The AGNOS software audio mixer / routing daemon (मिश्रण — "mixing"): fans many per-app S16 streams into one mixed writer to a vani sink. `MshRouter` opens/drives a real vani PCM device — `msh_router_open` (`audio_open_playback` → `audio_set_params` → `audio_prepare`), `msh_router_pump` → blocking `audio_write` (single-proc, `-EPIPE` recovery) **and** `msh_router_pump_nb` → `audio_avail`-gated `audio_write_nb` (multi-proc, cooperative), `msh_router_close` (drain + close). Vendors `vendor/vani-core.cyr` (provenance vani 1.1.0). `pump_probe` confirmed on real HW (2026-07-06). ⛔ **RETRACTED 2026-08-03** — this entry previously claimed a **two-proc tone** "proven non-silent on agnos QEMU (2026-07-10, RMS 2146)". **FALSE GREEN**: it required the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment for the loopback connect to complete at all; hook + smoke deleted. mishran's own CHANGELOG retracts the same claim at its `[0.4.1]` entry. TCP-on-loopback is retired as the local transport; re-proof belongs on the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9-§10. The real-HW sink verification is untouched. |
+| **dhvani** | **live — FULL `vani_*` surface** | Released **2.2.4** (no vendored vani copy). `src/playback.cyr` bridges dhvani's f64 AudioBuffer ↔ vani's interleaved S16/S24/S32 PCM, exercising the full device path: `vani_open_playback` / `vani_open_capture`, `vani_ring_new` / `_write` / `_read`, `vani_play` / `vani_play_from_ring`, `vani_record` / `_record_to_ring`, `vani_configure`, `vani_format_new`, `vani_alsa_for`, `vani_start`, `vani_close`. References vani through functions only, so it DCE-prunes for vani-free consumers. **This is the consumer that unblocks the full-surface 1.0 freeze.** |
+| cyrius-doom | **live + audibly verified on real HW** — core profile | Released **0.35.8** (tagged; vendors vani **1.2.5**). DOOM SFX route through `audio_write` in the 35 Hz `audio_tick` loop; audible at S16/stereo/44100 (2026-06-29). Deepest core exerciser: `audio_set_params_full` (period/buffer) + `audio_set_sw_params` + an `audio_open_capture` codec probe. Vendors `vendor/vani-core.cyr`. |
+| cyrius-polyomino | **live** — core profile | Released **0.5.4** (tagged; vendors vani **1.2.5**). Piece-lock / line-clear / level-up / top-out SFX → `audio_write`. 6 `audio_*` symbols. |
+| cyrius-bb | **live** — core profile | Released **0.8.3** (tagged; vendors vani **1.2.5**). Brick/wall/paddle + lost/over/fanfare SFX → `audio_write_bytes`. 6 `audio_*` symbols. |
+| **mishran** | **live — core sink (real-HW verified; two-proc agnos claim RETRACTED)** | **0.5.7** (released; vendors vani **1.2.2**). The AGNOS software audio mixer / routing daemon (मिश्रण — "mixing"): fans many per-app S16 streams into one mixed writer to a vani sink. `MshRouter` opens/drives a real vani PCM device — `msh_router_open` (`audio_open_playback` → `audio_set_params` → `audio_prepare`), `msh_router_pump` → blocking `audio_write` (single-proc, `-EPIPE` recovery) **and** `msh_router_pump_nb` → `audio_avail`-gated `audio_write_nb` (multi-proc, cooperative), `msh_router_close` (drain + close). Vendors `vendor/vani-core.cyr` (provenance vani 1.2.2). `pump_probe` confirmed on real HW (2026-07-06). ⛔ **RETRACTED 2026-08-03** — this entry previously claimed a **two-proc tone** "proven non-silent on agnos QEMU (2026-07-10, RMS 2146)". **FALSE GREEN**: it required the `MISHRAN_DUPLEX_SELFTEST` kernel hook's `net_ip = 0x7F000001` assignment for the loopback connect to complete at all; hook + smoke deleted. mishran's own CHANGELOG retracts the same claim at its `[0.4.1]` entry. TCP-on-loopback is retired as the local transport; re-proof belongs on the agnos socket (`anu`) — agnos `docs/development/planning/ipc.md` §9-§10. The real-HW sink verification is untouched. |
 | **jalwa** | **live — core `audio_*`, via dhvani** | Released **1.4.3**. Music player. Calls 7 core symbols (`audio_open_playback`, `audio_set_params`, `audio_prepare`, `audio_write`, `audio_drain`, `audio_drop`, `audio_close`) but declares no `[deps.vani]` — it reaches the shim through dhvani's bundle. Was listed here as "not yet integrated" through 1.2.2; corrected by the post-1.2.2 documentation sweep. |
 | shravan / naad / shruti / agnoshi | not integrated | **No code in any of them calls vani.** naad feeds dhvani, which owns the hardware path; shravan is codec-only; shruti and agnoshi have no audio path yet. README listed all four as consumers until the post-1.2.2 sweep — they are the intended pipeline, not current callers. |
 
@@ -112,6 +114,10 @@
 
 | Tag | Date | Highlights |
 |-----|------|------------|
+| `1.2.6` | 2026-09-27 | **Patch — a busy PCM no longer hangs the open.** `audio_open_*` open `O_NONBLOCK` (a busy PCM gives `-EBUSY` at once → null handle) and clear it with `F_SETFL` before the first PREPARE, so transfers still block: the kernel reads `O_NONBLOCK` for WRITEI / READI from a copy taken at PREPARE ([ADR 0005](../adr/0005-nonblocking-pcm-open.md), [architecture/001](../architecture/001-pcm-open-nonblock.md)). Reproduced and verified on the ALC897. The suite's exit status is now a real CI gate. New real-HW program `busy_open`; FIFO-based CPU tests with watchdogs. 893 → **909** assertions. API unchanged (109 / 25). Release audit: CVE window 2026-08-20 → 2026-09-27, UAPI re-pinned. |
+| `1.2.5` | 2026-09-12 | **Patch — toolchain `6.6.0` → `6.6.2`.** No source change. No audit doc (covered by 1.2.6's). |
+| `1.2.4` | 2026-09-07 | **Patch — pin `6.5.32` → `6.6.0`; `src/` on the Result value form.** `vani_result_unwrap` arity 1 → 2, API snapshot re-baselined for that signature. `vani_drain` / `vani_drop` / `vani_state` deliberately left mixed-return (the new diagnostic is advisory). No audit doc (covered by 1.2.6's). |
+| `1.2.3` | 2026-09-07 | **cyrius 6.6.0 Result value form — BREAKING for `vani_result_unwrap`** (`(res)` → `(t, v)`). Err propagation re-wraps with `return Err(res);`. No audit doc (covered by 1.2.6's). |
 | `1.2.2` | 2026-08-20 | **Patch — structural close-out of the P(-1) sweep.** Closes its largest open finding: XRUN/suspend/disconnect recovery had no coverage and no way to get any. The *decision* is now a pure function (`_vani_recovery_for`) tested exhaustively; a mockable ioctl indirection was considered and declined ([ADR 0004](../adr/0004-recovery-policy-seam.md)). Also: `snd_interval` open/empty flags were declared at v0.2.0 and read nowhere, so negotiate could return an endpoint the device excludes — now honoured; six mask sites made explicit about `FIRST_MASK`; dead `_clamp` removed; CI distlib gate extended to the `.deps` sidecars. 852 → **893** assertions, reference coverage **100%**. Mutation testing caught a tautological test in this release's own work. |
 | `1.2.1` | 2026-08-20 | **Patch — closing half of the 1.2.0 P(-1) sweep.** Closes all seven code-level items 1.2.0 carried forward: idempotent close across all three close functions; `VANI_ERR_DISCONNECTED` wired end to end (kernel state 8 was missing, so an unplugged device was treated as a *recoverable* error by the retry logic); range guards on `_hwp_interval_set_exact` and `_hwp_mask_set_value`; `avail_min == 0` rejected up front; the `boundary`-is-an-output comment; and four comments still naming the deleted stdlib `audio.cyr` — a miss in 1.2.0's own doc sweep, which grepped for "5.8.0" rather than the filename. 778/778, API unchanged at 109/25. |
 | `1.2.0` | 2026-08-20 | **Minor — full P(-1) sweep.** 13 repairs, all regression-tested with negative controls: the negotiated sample format never reached the kernel (U8→S8, S16_BE→S16_LE, FLOAT_LE→S32_LE); `audio_write_bytes` mis-sized S24_LE frames (stride 3 vs 4) so the kernel over-read past the caller's buffer; ring transfers leaked a scratch buffer per call (~110 MB / 60k iters, reproduced twice); `vani_play_from_ring` consumed the ring before writing so short writes destroyed audio; unbounded kernel counts in the mixer setters looped into a 1224-byte stack buffer; `vani_record_to_ring` trusted the kernel's frame count; 21 entry points faulted on a null handle (SIGSEGV reproduced). One **additive** public fn (`audio_set_params_fmt`) — hence a minor. 259 → **778** assertions, coverage 33% → **97%**. `_puti` deduplicated out of six programs onto stdlib `fmt_int`. cyrius pin `6.5.31`→`6.5.32`, provably inert. Method: 5 review lenses + adversarial re-verification that re-rated 50 of 55 findings. |
@@ -132,10 +138,10 @@
 Vani depends on:
 
 ```
-cyrius (6.5.32)
+cyrius (6.6.2)
   └─ stdlib — syscalls / string / alloc / str / fmt / vec / io / fs /
              args / hashmap / tagged / fnptr / freelist / process /
-             chrono / sakshi / yukti (2.3.8) / patra (1.13.9) /
+             chrono / sakshi / yukti (2.3.10) / patra (1.14.1) /
              atomic / sync / thread_local
 ```
 

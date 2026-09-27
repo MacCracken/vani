@@ -2,7 +2,8 @@
 
 Forward-looking only. `CHANGELOG.md` is the authoritative record of
 completed work — don't duplicate it here. Latest audit at
-`docs/audit/2026-08-20-v1.2.2-audit.md` (priors:
+`docs/audit/2026-09-27-v1.2.6-audit.md` (priors:
+`docs/audit/2026-08-20-v1.2.2-audit.md`,
 `docs/audit/2026-08-20-v1.2.1-audit.md`,
 `docs/audit/2026-08-20-v1.2.0-audit.md`,
 `docs/audit/2026-08-20-v1.1.4-audit.md`,
@@ -37,9 +38,17 @@ completed work — don't duplicate it here. Latest audit at
       [Hardware coverage](#hardware-coverage-hw-gated) — this is the largest
       open gap in the project. *Partly closed 2026-09-26:* with an ACL on
       `pcmC1D0p`, `probe`, `caps`, `throughput`, `latency_test` and the new
-      `busy_open` passed on card 1 (1.2.5 + the busy-open fix) — silent S16_LE
-      48 kHz stereo playback only. Nothing was heard, and capture, S24_LE and
+      `busy_open` passed on card 1 (1.2.6's code) — silent S16_LE 48 kHz
+      stereo playback only. Nothing was heard, and capture (including
+      `busy_open`'s capture half, which needs an ACL on `pcmC1D0c`), S24_LE and
       the non-default formats remain unexercised.
+- [ ] **PCM and control descriptors are opened without `O_CLOEXEC`** (1.2.6
+      audit L-2). True since v0.1.0. A consumer that forks and execs leaks the
+      descriptor into the child, which keeps the PCM busy after the parent closes
+      its handle; since 1.2.6 the parent's reopen fails at once instead of
+      hanging, but the device stays unavailable until the child exits. Adding
+      `O_CLOEXEC` to `_audio_open_pcm` and the mixer open changes what a child
+      inherits, so it gets its own decision rather than riding a patch.
 
 ## Declined
 
