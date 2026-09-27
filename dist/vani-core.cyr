@@ -71,8 +71,9 @@ fn _audio_devpath(card, device, typ): i64 {
 # ================================================================
 # Null-handle contract (1.2.0)
 # ================================================================
-# audio_open_playback / audio_open_capture return **0** on failure.
-# Every audio_* entry point that dereferences the handle therefore
+# audio_open_playback / audio_open_capture return **0** on failure —
+# including a busy PCM, which fails at once instead of waiting for its
+# holder. Every audio_* entry point that dereferences the handle therefore
 # guards `dev == 0` and returns -1, because the open-then-use sequence
 # this file's own header documents otherwise SIGSEGVs on the very
 # first call after a failed open — reproduced as exit 139 during the
@@ -608,6 +609,73 @@ fn _hwp_interval_clamp(hwp, int_idx, value): i64 {
 }
 
 # ================================================================
+# Opening a PCM node: fail fast when busy, then block as before
+# ================================================================
+# The kernel's snd_pcm_open answers a busy PCM — every subdevice held,
+# e.g. by PipeWire / wireplumber or another app — by SLEEPING until a
+# holder closes it or a signal arrives; with O_NONBLOCK it returns
+# -EBUSY at once. Through 1.2.5 both opens below were plain blocking
+# opens, so a core-profile consumer hung at startup instead of
+# degrading to silent. Verified on hardware 2026-09-26 (card 1 ALC897,
+# one subdevice, kernel 7.2.6): with the node held elsewhere, the
+# blocking open was still asleep after 5 s.
+#
+# The transfers must stay blocking, and O_NONBLOCK is not read live for
+# them: the kernel copies file->f_flags into substream->f_flags at open
+# and again at every PREPARE, and the WRITEI / READI loop reads that
+# copy. DRAIN reads the live file flags. So _audio_open_pcm opens with
+# O_NONBLOCK and clears it before returning, ahead of the first
+# PREPARE, and every later WRITEI / READI / DRAIN blocks exactly as it
+# did with a blocking open. The clear must not move later: cleared
+# after a PREPARE, writes stay non-blocking until the next one
+# (measured: a 16384-frame write returned 4096 at once, the next
+# -EAGAIN). Kernel refs, the measurements and the alternatives:
+# docs/architecture/001-pcm-open-nonblock.md, docs/adr/0005-nonblocking-pcm-open.md.
+
+# fcntl(2) commands. The same on every Linux arch (asm-generic/fcntl.h;
+# x86 does not override them) and not defined by stdlib syscalls.cyr.
+# AUDIO_-prefixed so the core bundle cannot collide with a consumer's
+# own F_GETFL / F_SETFL.
+enum AudioFcntl {
+    AUDIO_F_GETFL = 3;
+    AUDIO_F_SETFL = 4;
+}
+
+# Open the PCM node at `path` with access mode `acc_mode`: 1 for
+# playback (write-only), 0 for capture (read-only). Returns a BLOCKING
+# fd, or a negative errno: -EBUSY at once for a busy PCM, never a wait.
+# Linux only: the agnos arms of both open functions return before
+# reaching it.
+#
+# The access modes are literals, and this file's comments avoid stdlib's
+# names for them, on purpose: `cyrius distlib` matches identifiers in
+# comments as well as code when it writes dist/vani-core.deps, and those
+# names resolve to lib/io.cyr. Spelled out here, they (with one everyday
+# word that is also a lib/process.cyr function) took the core bundle
+# from 3 stdlib leaves to 8. See
+# docs/architecture/002-distlib-deps-counts-comment-words.md.
+fn _audio_open_pcm(path, acc_mode): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - 1;
+    #else
+    var fd = sys_open(path, acc_mode | O_NONBLOCK, 0);
+    if (fd < 0) { return fd; }
+    var r = syscall(SYS_FCNTL, fd, AUDIO_F_GETFL, 0);
+    if (r >= 0) {
+        # r - (r & O_NONBLOCK): the flags with O_NONBLOCK cleared.
+        r = syscall(SYS_FCNTL, fd, AUDIO_F_SETFL, r - (r & O_NONBLOCK));
+    }
+    if (r < 0) {
+        # A descriptor left non-blocking turns every write into a short
+        # write or -EAGAIN, which no consumer handles. Fail closed.
+        sys_close(fd);
+        return r;
+    }
+    return fd;
+    #endif
+}
+
+# ================================================================
 # Audio device handle
 # ================================================================
 # Layout (32 bytes):
@@ -616,7 +684,8 @@ fn _hwp_interval_clamp(hwp, int_idx, value): i64 {
 #   +16 channels    channel count
 #   +24 bit_depth   bits per sample
 
-# Open ALSA playback device, returns handle or 0 on failure
+# Open ALSA playback device, returns handle or 0 on failure. A busy
+# device fails at once (see _audio_open_pcm) rather than waiting.
 fn audio_open_playback(card, device): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     # agnos: one system output device; card/device are ignored. The
@@ -635,7 +704,7 @@ fn audio_open_playback(card, device): i64 {
     #else
     var path = _audio_devpath(card, device, 112);
     if (path == 0) { return 0; }
-    var fd = sys_open(path, 1, 0);
+    var fd = _audio_open_pcm(path, 1);  # write-only
     if (fd < 0) { return 0; }
     var dev = alloc(32);
     store64(dev, fd);
@@ -646,7 +715,8 @@ fn audio_open_playback(card, device): i64 {
     #endif
 }
 
-# Open ALSA capture device, returns handle or 0 on failure
+# Open ALSA capture device, returns handle or 0 on failure. A busy
+# device fails at once (see _audio_open_pcm) rather than waiting.
 fn audio_open_capture(card, device): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     # agnos: no capture band exists yet (the `snd_*` #64-69 surface is
@@ -655,7 +725,7 @@ fn audio_open_capture(card, device): i64 {
     #else
     var path = _audio_devpath(card, device, 99);
     if (path == 0) { return 0; }
-    var fd = sys_open(path, 0, 0);
+    var fd = _audio_open_pcm(path, 0);  # read-only
     if (fd < 0) { return 0; }
     var dev = alloc(32);
     store64(dev, fd);

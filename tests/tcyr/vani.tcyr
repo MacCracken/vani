@@ -2525,6 +2525,118 @@ fn test_error_emitters_are_safe_for_every_code() {
     return 0;
 }
 
+# ================================================================
+# Busy PCM open — fail at once, then hand back a blocking fd
+# ================================================================
+# _audio_open_pcm must not sleep when the PCM is busy, and must still
+# return a descriptor whose transfers block. A busy PCM cannot be staged
+# without hardware, so these drive the helper against a named FIFO,
+# whose open has the same shape: with no reader, a blocking O_WRONLY
+# open sleeps until one appears, while O_WRONLY|O_NONBLOCK fails at once
+# (-ENXIO where a PCM says -EBUSY). It has to be a NAMED FIFO: the
+# kernel skips that -ENXIO for an anonymous pipe reopened through
+# /proc/self/fd, so a pipe() stand-in opens fine and proves nothing.
+# The kernel half — transfers read the flags as of the last PREPARE, so
+# clearing O_NONBLOCK before it restores blocking writes — needs a real
+# PCM: programs/busy_open.cyr, docs/architecture/001-pcm-open-nonblock.md.
+
+# Writes "/tmp/vani-test-<pid>.fifo" into `buf` (at least 64 bytes).
+fn _test_fifo_path(buf) {
+    memcpy(buf, "/tmp/vani-test-", 15);
+    var n = fmt_int_buf(sys_getpid(), buf + 15);
+    memcpy(buf + 15 + n, ".fifo", 6);
+    return buf;
+}
+
+# mkfifo(path) mode 0600, as mknod(path, S_IFIFO | 0600, 0); S_IFIFO |
+# 0600 = 0010600 = 4480. x86_64 has mknod #133; aarch64 only mknodat #33,
+# relative to AT_FDCWD (-100).
+fn _test_mkfifo(path) {
+    #ifdef CYRIUS_ARCH_AARCH64
+    return syscall(33, 0 - 100, path, 4480, 0);
+    #else
+    return syscall(133, path, 4480, 0);
+    #endif
+}
+
+# Raise SIGALRM after `secs` seconds; 0 cancels. Its default action ends
+# the process, so a regression to a sleeping open fails the suite rather
+# than hanging it. alarm(2) is x86_64 #37; aarch64 has no alarm(2), so
+# setitimer(ITIMER_REAL) #103 with it_value.tv_sec = secs.
+fn _test_watchdog(secs) {
+    #ifdef CYRIUS_ARCH_AARCH64
+    var itv[32];
+    memset(&itv, 0, 32);
+    store64(&itv + 16, secs);
+    return syscall(103, 0, &itv, 0);
+    #else
+    return syscall(37, secs);
+    #endif
+}
+
+# The fcntl commands vani defines itself and the stdlib open flags,
+# against asm-generic/fcntl.h (x86_64 uses the same values). src/alsa.cyr
+# spells the access modes as the literals 1 and 0 (see _audio_open_pcm
+# for why), so the O_WRONLY / O_RDONLY pins are what check those.
+fn test_open_flag_literals() {
+    assert_eq(AUDIO_F_GETFL, 3, "F_GETFL");
+    assert_eq(AUDIO_F_SETFL, 4, "F_SETFL");
+    assert_eq(O_RDONLY, 0, "O_RDONLY");
+    assert_eq(O_WRONLY, 1, "O_WRONLY");
+    assert_eq(O_NONBLOCK, 2048, "O_NONBLOCK is 04000");
+    return 0;
+}
+
+fn test_open_pcm_fails_at_once_when_busy() {
+    var path[64];
+    _test_fifo_path(&path);
+    sys_unlink(&path);
+    assert_eq(_test_mkfifo(&path), 0, "mkfifo");
+    # Nothing has the FIFO open for reading, so a blocking O_WRONLY open
+    # of it would sleep — the stand-in for a busy PCM.
+    _test_watchdog(10);
+    var r = _audio_open_pcm(&path, O_WRONLY);
+    _test_watchdog(0);
+    # -ENXIO specifically: a bad path (-ENOENT) is negative too and would
+    # pass this vacuously.
+    assert_eq(r, 0 - ENXIO, "no reader: -ENXIO at once, not a sleep");
+    if (r >= 0) { sys_close(r); }
+    sys_unlink(&path);
+    return 0;
+}
+
+fn test_open_pcm_returns_blocking_fd() {
+    var path[64];
+    _test_fifo_path(&path);
+    sys_unlink(&path);
+    assert_eq(_test_mkfifo(&path), 0, "mkfifo");
+    # The first open below would sleep if the helper opened without
+    # O_NONBLOCK: a blocking O_RDONLY open of a FIFO waits for a writer.
+    _test_watchdog(10);
+
+    # Capture direction. A FIFO opens O_RDONLY|O_NONBLOCK with no writer.
+    var rd = _audio_open_pcm(&path, O_RDONLY);
+    assert(rd >= 0, "read side opens");
+    var fl = syscall(SYS_FCNTL, rd, AUDIO_F_GETFL, 0);
+    assert(fl >= 0, "F_GETFL on the read fd");
+    assert_eq(fl & O_NONBLOCK, 0, "read fd is blocking");
+    assert_eq(fl & 3, O_RDONLY, "read fd keeps O_RDONLY");
+
+    # Playback direction. `rd` is a reader now, so this one opens too.
+    var w = _audio_open_pcm(&path, O_WRONLY);
+    assert(w >= 0, "write side opens while a reader exists");
+    fl = syscall(SYS_FCNTL, w, AUDIO_F_GETFL, 0);
+    assert(fl >= 0, "F_GETFL on the write fd");
+    assert_eq(fl & O_NONBLOCK, 0, "write fd is blocking");
+    assert_eq(fl & 3, O_WRONLY, "write fd keeps O_WRONLY");
+
+    _test_watchdog(0);
+    if (w >= 0) { sys_close(w); }
+    if (rd >= 0) { sys_close(rd); }
+    sys_unlink(&path);
+    return 0;
+}
+
 fn main() {
     alloc_init();
     test_group("error");
@@ -2732,7 +2844,17 @@ fn main() {
     test_mixer_elem_info_fails_on_bad_fd();
     test_error_emitters_are_safe_for_every_code();
 
-    assert_summary();
+    test_group("busy PCM open");
+    test_open_flag_literals();
+    test_open_pcm_fails_at_once_when_busy();
+    test_open_pcm_returns_blocking_fd();
+
+    # The exit status is the verdict `cyrius test` and CI read. Through
+    # 1.2.5 it was always 0: the failure count went unused. 1 on any
+    # failure rather than the count itself: an exit status is 8 bits, so
+    # 256 failures would wrap to a pass, and `cyrius test` reads any
+    # status above 128 as a signal death.
+    if (assert_summary() > 0) { return 1; }
     return 0;
 }
 

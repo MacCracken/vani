@@ -5,6 +5,103 @@ All notable changes to Vani will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A busy PCM no longer hangs `audio_open_playback` / `audio_open_capture`.** Both opened
+  `/dev/snd/pcmC*D*{p,c}` blocking, and the kernel's `snd_pcm_open` answers a busy PCM — every
+  subdevice held; the ALC897 analog PCM has one, and PipeWire / wireplumber hold it whenever they
+  have a stream — by sleeping until the holder closes it. So every core-profile consumer
+  (cyrius-doom, polyomino, bb, mishran) could hang at startup instead of running silent. Both now
+  go through a new private `_audio_open_pcm`, which opens with `O_NONBLOCK` — a busy PCM gives
+  `-EBUSY` at once and the open returns 0, per the null-handle contract — then clears
+  `O_NONBLOCK` with `F_GETFL` / `F_SETFL` before returning. If the clear fails, the fd is closed
+  and the open fails: a handle that silently delivers short writes is worse than none. The agnos
+  arms (`sys_snd_open`) are unchanged.
+
+  **Writes, reads and DRAIN still block**, and that depends on where the flag is cleared. The
+  kernel reads `O_NONBLOCK` for WRITEI / READI from a copy of the file flags it takes at open and
+  **refreshes at every PREPARE**; DRAIN reads the live flags. Cleared inside the open — ahead of
+  the first PREPARE — the descriptor is indistinguishable from a blocking open. Cleared after a
+  PREPARE it is not: on hardware a 16384-frame write then returns 4096 at once and the next
+  returns `-EAGAIN`. Kernel paths, the measured cases and the invariant:
+  [`docs/architecture/001-pcm-open-nonblock.md`](docs/architecture/001-pcm-open-nonblock.md). Why
+  not polyomino's probe-then-open (it leaves a race) or a `poll()` emulation:
+  [ADR 0005](docs/adr/0005-nonblocking-pcm-open.md). No public API change (109 / 25 symbols);
+  both bundles grow by 3,440 B (core 46,459 → 49,899), nearly all of it the explanation.
+
+- **The test suite's exit status now reflects failures, so CI's Test step can go red.** `main()`
+  in `tests/tcyr/vani.tcyr` called `assert_summary()` and then `return 0;`, discarding the failure
+  count it returns. The suite binary, `cyrius test` and the CI step therefore exited 0 however many
+  assertions failed; only a crash or a signal turned the step red, so through 1.2.5 every
+  regression assertion in the suite was advisory in CI. It now returns 1 on any failure.
+
+  Not the count itself, which is the ecosystem habit (`return assert_summary();`): an exit status
+  is 8 bits, and `cyrius test` reads anything above 128 as a signal death. Measured on scratch
+  suites, returning the count reports 139 failures as "killed by signal 11 SIGSEGV — the test never
+  reached a verdict" and 256 failures as a pass with no FAIL line; the clamp reports both as exit 1.
+  (The `cyrius init` test template clamps the same way.) Verified: the unmodified suite passes
+  909/909 and exits 0; on a scratch copy with the `F_SETFL` clear removed from `_audio_open_pcm`,
+  it reports 2 FAILs and `cyrius test` exits 1, naming the file. `tests/bcyr/vani.bcyr` makes no
+  assertions, so its `return 0` stands.
+
+### Added
+
+- **`programs/busy_open.cyr` → `build/vani_busy_open`** — silent real-HW check. It holds every
+  subdevice itself (no second process needed), checks both opens return 0 at once, then releases
+  them and checks the handle still blocks: a WRITEI of 4× the ring returns all of it after ~256 ms,
+  DRAIN waits for the tail, both again after an XRUN → PREPARE recovery, and a 100 ms READI
+  returns all 4800 frames. A 5 s SIGALRM watchdog turns a regression to a sleeping open into a
+  failure rather than a hang (the program holds the PCM itself, so a sleeping open never wakes).
+- **CPU tests, group `busy PCM open`** (+16 assertions, 893 → 909). The fcntl / open-flag
+  literals pinned against `asm-generic/fcntl.h`; `_audio_open_pcm` against a **named FIFO**, whose
+  open has a busy PCM's shape (with no reader a blocking open sleeps, `O_NONBLOCK` fails at once
+  with `-ENXIO`) under a 10 s SIGALRM watchdog; the returned fd blocking, with its access mode
+  intact, in both directions. A `pipe()` stand-in was tried first and proves nothing: the kernel
+  skips that `-ENXIO` for an anonymous pipe reopened through `/proc/self/fd`.
+
+### Verified
+
+- **On hardware** — 2026-09-26, card 1 ALC897 analog (one subdevice), kernel 7.2.6:
+  - With a second process holding `pcmC1D0p`, the 1.2.5 `audio_open_playback(1, 0)` was still
+    asleep when `timeout 5` killed it (exit 124); the fixed one returned 0 in **71 µs**.
+  - `vani_busy_open`: all 16 playback checks pass (busy open 0 in 4-9 µs; 16384 frames in 256 ms;
+    DRAIN 85 ms; the same after XRUN → `-EPIPE` → PREPARE). The capture half was **skipped**:
+    this shell has no ACL on `pcmC1D0c`.
+  - `vani_probe`, `vani_caps`, `vani_throughput`, `vani_latency_test` pass through the new open.
+  - Negative controls. Open without `O_NONBLOCK`: the suite and `vani_busy_open` are killed by
+    their watchdogs (exit 142). `F_SETFL` clear removed: 2 suite FAILs and 10 `busy_open` FAILs
+    (the 4×-ring write returns 4096 at once, DRAIN returns `-EAGAIN`).
+- 909/909 on x86_64 and on aarch64 under qemu-user (which runs the `mknodat` / `setitimer`
+  paths); lint 0 warnings, and the two `raw sys_open w/ literal flags` notes on `src/alsa.cyr` are
+  gone; fmt, vet clean; API surface 109, unchanged; both `.deps` sidecars unchanged (3 / 21
+  leaves); smoke builds on x86_64, aarch64 and agnos. At the time, the suite's 2 FAILs above
+  still exited 0, because `main()` discarded the failure count — fixed in this release (see
+  Fixed).
+
+### Notes
+
+- **`cyrius distlib` counts words in comments when it writes `.deps`.** A first draft of this
+  change took `dist/vani-core.deps` from 3 stdlib leaves to 8: the names `O_WRONLY` / `O_RDONLY`
+  resolve to `lib/io.cyr`, and one comment's ordinary English word resolves to a
+  `lib/process.cyr` function (which brings `vec` / `str` / `fmt`). Both are gone; the access modes
+  in `src/alsa.cyr` are now literals. The drift gate cannot catch this, since a comment edit
+  committed with its regenerated sidecar passes it.
+  [`docs/architecture/002-distlib-deps-counts-comment-words.md`](docs/architecture/002-distlib-deps-counts-comment-words.md);
+  filed upstream as cyrius issue `2026-09-26-vani-distlib-profile-deps-counts-comments-and-strings-as-references.md`.
+- cyrius-polyomino's `audio_probe_playback` workaround becomes unnecessary once it re-vendors a
+  vani with this fix, and the race its CHANGELOG accepts goes with it.
+
+## [1.2.5] — 2026-09-12
+
+### Changed
+
+- **Toolchain `6.6.0` → `6.6.2`.** No source change: this repo was already on the
+  value form, so the flip cost it nothing. Re-verified on every surface it ships —
+  build, tests, and any bench/fuzz/distlib target, including every
+  `[lib.<profile>]` bundle.
+
 ## [1.2.4] — 2026-09-07
 
 ### Changed
@@ -27,18 +124,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   An earlier cut of this release "fixed" the warning by wrapping the raw path in `vani_ok(...)`.
   That broke three tests (`got 0, expected -1`) and was reverted: the diagnostic is advisory, and
   silencing it here would have changed a documented, tested API to quiet a compiler note.
-
-## [Unreleased]
-
-## [1.2.5] — 2026-09-12
-
-### Changed
-
-- **Toolchain `6.6.0` → `6.6.2`.** No source change: this repo was already on the
-  value form, so the flip cost it nothing. Re-verified on every surface it ships —
-  build, tests, and any bench/fuzz/distlib target, including every
-  `[lib.<profile>]` bundle.
-
 
 ## [1.2.3] — 2026-09-07
 

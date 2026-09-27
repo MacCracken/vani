@@ -32,3 +32,4 @@ new contributor reading the diff, write an ADR.
 | [0002](0002-freeze-full-vani-surface-at-1.0.md) | Freeze the full `vani_*` surface at 1.0.0 | Accepted |
 | [0003](0003-no-windows-pe-target.md) | Windows/PE is not a supported vani target | Accepted |
 | [0004](0004-recovery-policy-seam.md) | Split recovery policy from transport; decline a mockable ioctl seam | Accepted |
+| [0005](0005-nonblocking-pcm-open.md) | Open PCM nodes `O_NONBLOCK`, then clear it before the first PREPARE | Accepted |

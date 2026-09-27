@@ -1,0 +1,295 @@
+# programs/busy_open.cyr — a busy PCM fails the open at once; a free one
+# opens and still blocks
+#
+# **Silent.** Plays only zero frames. The capture half reads 100 ms from
+# the capture node into memory and discards it.
+#
+# The kernel's snd_pcm_open answers a busy PCM (every subdevice held) by
+# sleeping until the holder closes it; vani through 1.2.5 did exactly
+# that, so a consumer hung at startup whenever PipeWire / wireplumber or
+# another app had the device. vani now opens O_NONBLOCK — -EBUSY at once
+# — and clears the flag before any PREPARE, because the kernel reads
+# O_NONBLOCK for WRITEI / READI from a copy it takes at each PREPARE.
+# docs/architecture/001-pcm-open-nonblock.md has the whole story.
+#
+# What this verifies, per direction:
+#   1. busy — with every subdevice held (by this program, so no second
+#      process is needed), audio_open_* returns 0 in well under a second.
+#      A regression would sleep forever — this process holds the PCM
+#      itself — so a 5 s SIGALRM watchdog turns that into a failure.
+#   2. free — the fd vani hands back is blocking (F_GETFL), and the
+#      kernel agrees. Playback: a WRITEI of 4x the ring returns the full
+#      count after ~3 ring-lengths, DRAIN waits for the tail, and both
+#      still hold after an XRUN -> PREPARE recovery. Capture: a 100 ms
+#      READI returns all 4800 frames after ~100 ms. A non-blocking fd
+#      returns the ring's worth (or -EAGAIN) at once instead.
+#
+# The CPU suite covers _audio_open_pcm's control flow against a FIFO;
+# only a real PCM can show the kernel half. Needs rw access to the
+# nodes: they are root:audio with a logind ACL for the seat session.
+#
+# Defaults to card 1 device 0 — edit for your hardware. 48 kHz S16_LE
+# stereo, 4 periods of 1024 frames: a shape HD-Audio accepts.
+
+include "src/lib.cyr"
+
+enum BusyCfg {
+    BUSY_CARD      = 1;
+    BUSY_DEVICE    = 0;
+    BUSY_RATE      = 48000;
+    BUSY_PERIOD    = 1024;
+    BUSY_BUFFER    = 4096;
+    BUSY_WRITE     = 16384;   # 4x the ring
+    BUSY_READ      = 4800;    # 100 ms
+    BUSY_HOLD_MAX  = 64;      # subdevices held at most
+    BUSY_WATCHDOG  = 5;       # seconds
+}
+
+var _busy_fails = 0;
+var _busy_skips = 0;
+
+fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
+
+fn _ms(ns) { return ns / 1000000; }
+
+fn _check(ok, what) {
+    if (ok == 1) {
+        _puts("    PASS ");
+    } else {
+        _puts("    FAIL ");
+        _busy_fails = _busy_fails + 1;
+    }
+    _puts(what);
+    _puts("\n");
+    return ok;
+}
+
+# SIGALRM after `secs` s, 0 cancels (same as the CPU suite's watchdog).
+# alarm(2) is x86_64 #37; aarch64 has only setitimer(ITIMER_REAL) #103.
+fn _watchdog(secs) {
+    #ifdef CYRIUS_ARCH_AARCH64
+    var itv[32];
+    memset(&itv, 0, 32);
+    store64(&itv + 16, secs);
+    return syscall(103, 0, &itv, 0);
+    #else
+    return syscall(37, secs);
+    #endif
+}
+
+fn _is_blocking_fd(fd) {
+    var fl = syscall(SYS_FCNTL, fd, AUDIO_F_GETFL, 0);
+    if (fl < 0) { return 0; }
+    if ((fl & O_NONBLOCK) != 0) { return 0; }
+    return 1;
+}
+
+# Open `path` O_NONBLOCK until the kernel reports it busy, storing each
+# fd in `fds`. Returns how many were opened; `*err` gets the errno that
+# stopped the loop (-EBUSY once every subdevice is held).
+fn _hold_all(path, acc_mode, fds, err) {
+    var n = 0;
+    var fd = 0;
+    var done = 0;
+    store64(err, 0);
+    while (done == 0) {
+        fd = sys_open(path, acc_mode | O_NONBLOCK, 0);
+        if (fd < 0) {
+            store64(err, fd);
+            done = 1;
+            continue;
+        }
+        store64(fds + n * 8, fd);
+        n = n + 1;
+        if (n >= BUSY_HOLD_MAX) { done = 1; }
+    }
+    return n;
+}
+
+fn _release_all(fds, n) {
+    var i = 0;
+    while (i < n) {
+        sys_close(load64(fds + i * 8));
+        i = i + 1;
+    }
+    return 0;
+}
+
+# The busy half, either direction. Returns 1 if the free half can run.
+fn _busy_half(typ) {
+    var path = _audio_devpath(BUSY_CARD, BUSY_DEVICE, typ);
+    var acc = O_WRONLY;
+    if (typ == 99) { acc = O_RDONLY; }
+    var fds = alloc(BUSY_HOLD_MAX * 8);
+    var err[8];
+    var held = _hold_all(path, acc, fds, &err);
+    var e = load64(&err);
+    _puts("  hold: ");
+    fmt_int(held);
+    _puts(" subdevice(s), then ");
+    fmt_int(e);
+    _puts("\n");
+    if (held == 0) {
+        if (e != 0 - EBUSY) {
+            _puts("    SKIP cannot open the node at all (");
+            fmt_int(e);
+            _puts(") — no access, or no such device\n");
+            _busy_skips = _busy_skips + 1;
+            return 0;
+        }
+        _puts("    note: already busy — held elsewhere, not by this program\n");
+    }
+    if (held > 0) {
+        if (e != 0 - EBUSY) {
+            _puts("    SKIP stopped before -EBUSY, so the PCM may not be busy\n");
+            _release_all(fds, held);
+            _busy_skips = _busy_skips + 1;
+            return 0;
+        }
+    }
+
+    _puts("  busy open (watchdog ");
+    fmt_int(BUSY_WATCHDOG);
+    _puts(" s) ...\n");
+    _watchdog(BUSY_WATCHDOG);
+    var t0 = clock_now_ns();
+    var h = 0;
+    if (typ == 112) { h = audio_open_playback(BUSY_CARD, BUSY_DEVICE); }
+    if (typ == 99)  { h = audio_open_capture(BUSY_CARD, BUSY_DEVICE); }
+    var dt = clock_now_ns() - t0;
+    _watchdog(0);
+    _puts("    returned ");
+    fmt_int(h);
+    _puts(" in ");
+    fmt_int(dt / 1000);
+    _puts(" us\n");
+    _check(h == 0, "busy PCM: open returned 0");
+    _check(dt < 1000000000, "busy PCM: open returned in under 1 s");
+    if (h != 0) { audio_close(h); }
+    if (held == 0) {
+        _puts("    SKIP free half — the PCM is held elsewhere\n");
+        _busy_skips = _busy_skips + 1;
+        return 0;
+    }
+    _release_all(fds, held);
+    return 1;
+}
+
+# Time one write of `frames` zero frames; prints and returns the result.
+fn _timed_write(h, buf, frames, dt_out) {
+    var t0 = clock_now_ns();
+    var w = audio_write(h, buf, frames);
+    store64(dt_out, clock_now_ns() - t0);
+    _puts("    write ");
+    fmt_int(frames);
+    _puts(" -> ");
+    fmt_int(w);
+    _puts(" in ");
+    fmt_int(_ms(load64(dt_out)));
+    _puts(" ms\n");
+    return w;
+}
+
+fn _playback_free_half(buf) {
+    var h = audio_open_playback(BUSY_CARD, BUSY_DEVICE);
+    if (_check(h != 0, "free PCM: open returned a handle") == 0) { return 0; }
+    _check(_is_blocking_fd(audio_fd(h)), "fd is blocking (O_NONBLOCK clear)");
+    var r = audio_set_params_full(h, BUSY_RATE, 2, 16, BUSY_PERIOD, BUSY_BUFFER);
+    if (_check(r == 0, "HW_PARAMS 48 kHz S16_LE stereo, 1024 x 4") == 0) {
+        audio_close(h);
+        return 0;
+    }
+    _check(audio_prepare(h) == 0, "PREPARE");
+
+    # (BUSY_WRITE - BUSY_BUFFER) / BUSY_RATE = 256 ms if it blocks.
+    var dt[8];
+    var w = _timed_write(h, buf, BUSY_WRITE, &dt);
+    _check(w == BUSY_WRITE, "WRITEI of 4x the ring wrote all of it");
+    _check(load64(&dt) >= 150000000, "... and blocked for it (>= 150 ms)");
+
+    var t0 = clock_now_ns();
+    r = audio_drain(h);
+    var ddt = clock_now_ns() - t0;
+    _puts("    drain -> ");
+    fmt_int(r);
+    _puts(" in ");
+    fmt_int(_ms(ddt));
+    _puts(" ms\n");
+    _check(r == 0, "DRAIN returned 0");
+    _check(ddt >= 40000000, "DRAIN waited for the tail (>= 40 ms)");
+
+    # XRUN -> PREPARE: the recovery path every consumer uses. The
+    # re-PREPARE re-reads the (now clear) flag, so this must still block.
+    _check(audio_prepare(h) == 0, "PREPARE after DRAIN");
+    audio_write(h, buf, BUSY_PERIOD);
+    sleep_ms(300);
+    _check(audio_get_state(h) == SND_PCM_STATE_XRUN, "ring ran dry: XRUN");
+    _check(audio_write(h, buf, BUSY_PERIOD) == 0 - 32, "write in XRUN: -EPIPE");
+    _check(audio_prepare(h) == 0, "recovery PREPARE");
+    w = _timed_write(h, buf, BUSY_WRITE, &dt);
+    _check(w == BUSY_WRITE, "after recovery: WRITEI wrote all of it");
+    _check(load64(&dt) >= 150000000, "... and still blocked (>= 150 ms)");
+    audio_close(h);
+    return 0;
+}
+
+fn _capture_free_half(buf) {
+    var h = audio_open_capture(BUSY_CARD, BUSY_DEVICE);
+    if (_check(h != 0, "free PCM: open returned a handle") == 0) { return 0; }
+    _check(_is_blocking_fd(audio_fd(h)), "fd is blocking (O_NONBLOCK clear)");
+    var r = audio_set_params_full(h, BUSY_RATE, 2, 16, BUSY_PERIOD, BUSY_BUFFER);
+    if (_check(r == 0, "HW_PARAMS 48 kHz S16_LE stereo, 1024 x 4") == 0) {
+        audio_close(h);
+        return 0;
+    }
+    _check(audio_prepare(h) == 0, "PREPARE");
+    var t0 = clock_now_ns();
+    var got = audio_read(h, buf, BUSY_READ);
+    var dt = clock_now_ns() - t0;
+    _puts("    read ");
+    fmt_int(BUSY_READ);
+    _puts(" -> ");
+    fmt_int(got);
+    _puts(" in ");
+    fmt_int(_ms(dt));
+    _puts(" ms\n");
+    _check(got == BUSY_READ, "READI of 100 ms returned all of it");
+    _check(dt >= 80000000, "... and blocked for it (>= 80 ms)");
+    audio_close(h);
+    return 0;
+}
+
+fn main() {
+    alloc_init();
+    _puts("vani busy_open — card ");
+    fmt_int(BUSY_CARD);
+    _puts(" device ");
+    fmt_int(BUSY_DEVICE);
+    _puts("\n");
+    var bytes = BUSY_WRITE * 4;
+    var buf = alloc(bytes);
+    memset(buf, 0, bytes);
+
+    _puts("playback:\n");
+    if (_busy_half(112) == 1) { _playback_free_half(buf); }
+    _puts("capture:\n");
+    if (_busy_half(99) == 1) { _capture_free_half(buf); }
+
+    if (_busy_fails > 0) {
+        _puts("BUSY_OPEN FAIL — ");
+        fmt_int(_busy_fails);
+        _puts(" check(s) failed\n");
+        return 1;
+    }
+    _puts("BUSY_OPEN PASS");
+    if (_busy_skips > 0) {
+        _puts(" (");
+        fmt_int(_busy_skips);
+        _puts(" direction(s) skipped)");
+    }
+    _puts("\n");
+    return 0;
+}
+
+var ec = main();
+sys_exit(ec);

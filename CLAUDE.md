@@ -153,6 +153,7 @@ cyrius vet programs/smoke.cyr                          # link-time vet
 ./build/vani_mixer_test                                # silent — list mixer elements + values
 ./build/vani_latency_test                              # silent — both presets back-to-back
 ./build/vani_devices                                   # silent — yukti enumerator + open round-trip
+./build/vani_busy_open                                 # silent — busy PCM fails the open at once; free one still blocks
 ./build/vani_tone                                      # AUDIBLE — 200 ms 440 Hz square wave
 ./build/vani_vanitone                                  # AUDIBLE — AGNOS bring-up tone (also builds --agnos)
 ```
@@ -183,6 +184,7 @@ vani/
 │   ├── mixer_test.cyr        — read-only mixer enumeration
 │   ├── latency_test.cyr      — low-latency + casual presets back-to-back
 │   ├── devices.cyr           — yukti enumerator + open round-trip
+│   ├── busy_open.cyr         — busy PCM fails the open at once; free one still blocks (silent)
 │   └── vanitone.cyr          — AGNOS Gate-4 bring-up tone (0.9.7), QEMU-validated
 ├── bench-history.csv         — bench baseline (timestamp,commit,branch,name,ns)
 ├── docs/

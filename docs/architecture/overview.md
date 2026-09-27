@@ -42,7 +42,10 @@ entire stack from one bundle.
 
 ```
 1. vani_open_playback(card, device)
-       → audio_open_playback (alsa.cyr) → open("/dev/snd/pcmCxDxp", O_WRONLY)
+       → audio_open_playback (alsa.cyr) → open("/dev/snd/pcmCxDxp", O_WRONLY | O_NONBLOCK)
+       → fcntl(F_SETFL) clears O_NONBLOCK before any PREPARE
+         (a busy PCM fails at once; transfers still block —
+          001-pcm-open-nonblock.md)
 2. vani_configure(d, fmt)
        → audio_set_params (alsa.cyr) → store rate / channels / bit_depth
 3. vani_prepare(d)
@@ -176,6 +179,12 @@ The `.deps` sidecars record the stdlib leaves each bundle needs; a
 consumer's `cyrius deps` reads them. A stale sidecar breaks downstream
 builds while both `.cyr` files look fine, which is why the drift gate
 covers them.
+
+The sidecar is computed from every identifier-shaped word in the bundle,
+**comments included**, so a word in a `src/alsa.cyr` comment can add
+stdlib modules to the core profile — and the drift gate passes if the
+regenerated sidecar is committed with it. See
+[002](002-distlib-deps-counts-comment-words.md).
 
 ## The pin is the supply chain
 
