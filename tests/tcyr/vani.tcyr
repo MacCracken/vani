@@ -2551,11 +2551,12 @@ fn _test_fifo_path(buf) {
 # mkfifo(path) mode 0600, as mknod(path, S_IFIFO | 0600, 0); S_IFIFO |
 # 0600 = 0010600 = 4480. x86_64 has mknod #133.
 #
-# aarch64 has only mknodat #33, and cyrius 6.6.6 has no way to issue it:
-# since 6.6.5 the aarch64 backend rewrites a literal syscall(33, ...) to
-# dup3, the peer of x86 dup2 #33 (measured under qemu-aarch64: dup3(-100,
-# path, 0) = -EBADF, so mkfifo "got -9"), and the stdlib has neither a
-# SYS_MKNODAT nor a sys_mknodat. cyrius 6.6.8 adds sys_mknodat. Until vani
+# aarch64 has only mknodat #33, and cyrius 6.6.6 has no stdlib name for
+# it (no SYS_MKNODAT, no sys_mknodat), while since 6.6.5 the aarch64
+# backend rewrites a literal syscall(33, ...) to dup3, the peer of x86
+# dup2 #33 (measured under qemu-aarch64: dup3(-100, path, 0) = -EBADF, so
+# mkfifo "got -9"). The test skips rather than hand-assembling the call in
+# an asm block. cyrius 6.6.8 adds sys_mknodat. Until vani
 # pins it, the FIFO tests are SKIPPED on aarch64 — counted, named and
 # reported after the summary by _test_skip, never a silent pass. This arm
 # is not reached (see _test_fifo_skipped) and fails if it ever is.

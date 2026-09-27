@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gave 909/909. `_test_mkfifo` issued aarch64 `mknodat` as the literal `syscall(33, …)`, and
   since cyrius 6.6.5 the aarch64 backend rewrites 33 to `dup3`, the peer of x86 `dup2` #33 (under
   qemu-aarch64: `dup3(-100, <path>, 0) = -EBADF`). The compiler gives no diagnostic, and 6.6.6 has
-  no correct spelling of the call: no `SYS_MKNODAT`, no `sys_mknodat`. cyrius 6.6.8 adds
+  no stdlib name for the call (no `SYS_MKNODAT`, no `sys_mknodat`); the test skips rather than
+  hand-assembling it in an `asm` block (`svc #0`, x8 = 33). cyrius 6.6.8 adds
   `sys_mknodat`; until vani pins it, `test_open_pcm_fails_at_once_when_busy` and
   `test_open_pcm_returns_blocking_fd` print a `SKIP:` line naming the test and the reason, and
   `main()` reports the count after the summary. A skip never counts as a pass. The aarch64
