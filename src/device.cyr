@@ -30,8 +30,8 @@ enum VaniDirection {
 
 # Typed PCM state — mirrors AlsaPcmState 1:1 with vani_-prefixed
 # names. Use `vani_state_typed(d)` for the enum form;
-# `vani_state(d)` still returns the raw int for callers that
-# already speak the SND_PCM_STATE_* constants.
+# `vani_state(d)` returns `Ok(raw int)` for callers that already
+# speak the SND_PCM_STATE_* constants (bind it `var t, st = ...`).
 enum VaniState {
     VANI_STATE_OPEN      = 0;
     VANI_STATE_SETUP     = 1;
@@ -301,19 +301,31 @@ fn vani_start(d): i64 {
     return vani_ok(d);
 }
 
+# drain / drop / state return a Result on EVERY path. Until 1.2.8 the
+# live path returned the raw audio_* integer while the null guard returned
+# Err, so the caller read that integer as the TAG: a device in state SETUP
+# (1) read as Err, and so did any non-zero drain/drop status.
+# CHANGELOG [1.2.8].
 fn vani_drain(d): i64 {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
-    return audio_drain(vani_audio_handle(d));
+    var r = audio_drain(vani_audio_handle(d));
+    if (r < 0) { return vani_err_result(VANI_ERR_DRAIN); }
+    return vani_ok(d);
 }
 
 fn vani_drop(d): i64 {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
-    return audio_drop(vani_audio_handle(d));
+    var r = audio_drop(vani_audio_handle(d));
+    if (r < 0) { return vani_err_result(VANI_ERR_DROP); }
+    return vani_ok(d);
 }
 
+# Ok payload is the raw SND_PCM_STATE_* value, or -1 when the STATUS
+# query itself failed (what audio_get_state reports); vani_state_typed
+# maps -1 to VANI_STATE_UNKNOWN.
 fn vani_state(d): i64 {
     if (d == 0) { return vani_err_result(VANI_ERR_DEVICE_INVALID); }
-    return audio_get_state(vani_audio_handle(d));
+    return vani_ok(audio_get_state(vani_audio_handle(d)));
 }
 
 # ================================================================

@@ -166,6 +166,22 @@ jobs:
           CYRIUS_DCE=1 cyrius build programs/smoke.cyr build/vani_smoke
           echo "vani_smoke: $(wc -c < build/vani_smoke) bytes"
 
+      - name: No mixed-return fns
+        # Until 1.2.8 vani_drain / vani_drop / vani_state returned Err on
+        # the null guard and the RAW audio_* integer on the live path, so
+        # a two-value bind read that integer as the tag (a device in state
+        # SETUP read as Err). The compiler reports that shape as "returns
+        # a `: stack` pair on another path but a SINGLE value here"; any
+        # such warning over the full include chain is now a failure.
+        run: |
+          mkdir -p build
+          cyrius build programs/smoke.cyr build/vani_smoke_full 2> build/mixed.err || { cat build/mixed.err; exit 1; }
+          if grep -F 'but a SINGLE value here' build/mixed.err; then
+            echo "mixed-return fn: return a Result variant on every path"
+            exit 1
+          fi
+          echo "no mixed-return fns"
+
       - name: Verify ELF
         run: xxd -l 4 build/vani_smoke | grep -q "7f45 4c46"
 

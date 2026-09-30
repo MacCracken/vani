@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.8] — 2026-09-30
+
+### Fixed
+
+- **`vani_drain`, `vani_drop` and `vani_state` return a Result on every path.** Each returned
+  `Err(VANI_ERR_DEVICE_INVALID)` on its `d == 0` guard but the raw `audio_drain` /
+  `audio_drop` / `audio_get_state` integer on the live path. Under the value form a Result is a
+  (tag, payload) register pair, so on the live path the caller read that integer as the TAG and
+  the payload as garbage: a device in state SETUP (1) read as `Err`, and so did any non-zero
+  drain or drop status. The compiler reported all three ("returns a `: stack` pair on another
+  path but a SINGLE value here"). The 1.2.4 note below called this the intended contract; it
+  was not, because nothing a caller could bind distinguished "state 1" from `Err`. Now:
+  - `vani_drain` / `vani_drop` return `Ok(d)`, or `Err(VANI_ERR_DRAIN)` / `Err(VANI_ERR_DROP)`
+    when the ioctl fails. The two codes are new (23 and 24), with names and non-recoverable
+    classification.
+  - `vani_state` returns `Ok(raw)`, where `raw` is the `SND_PCM_STATE_*` value, or -1 when the
+    STATUS query itself failed (`vani_state_typed` still maps that to `VANI_STATE_UNKNOWN`).
+  Callers that used the call as a statement (`vani_drain(d);`, every vani program) are
+  unaffected. A caller that sign-tested the old raw return must bind `var t, v =` and branch on
+  `is_ok(t)`. No other repo in `~/Repos` calls these three functions.
+- **`_sk_emit_err` renamed `_vani_sk_emit_err`.** mabda defines a helper of the same name, and
+  cyrius has one global namespace, so with both folds in scope the last definition won
+  program-wide: mabda's GPU errors were named through `vani_err_name` and gated on vani's
+  observability flag, or the reverse, depending on include order (`duplicate fn '_sk_emit_err'
+  (last definition wins)`). mabda 4.1.6 renames its side to `_mabda_sk_emit_err`. The helper
+  is private by convention; the rename changes no public API.
+
+### Tests
+
+- `test_drain_drop_state_are_results_on_the_live_path`: 12 assertions that bind `var t, v =`
+  on a non-null bad-fd handle (the live path) and on the null guard. Against 1.2.7's
+  `src/device.cyr` four of them fail (`live drain failure is an Err tag`, `live drop …`,
+  `live state query is an Ok tag`, and the Ok payload reads a stack address instead of -1).
+  The two `assert_lt(..., 0, "... propagates the raw negative")` rows and the raw `-1`
+  state row, which pinned the defect, are replaced. x86_64 918 passed (was 909); aarch64
+  under qemu-user 907 passed with the same 2 counted skips (was 898).
+- CI: a **No mixed-return fns** step builds `programs/smoke.cyr` over the full include chain and
+  fails on any "but a SINGLE value here" warning. It reports 3 against 1.2.7.
+
+### Notes
+
+- Toolchain pin unchanged (`6.6.6`). `docs/api-surface.snapshot` unchanged: no public fn was
+  added, removed or re-aritied. cyrius re-folds `lib/vani.cyr` from this release's
+  `dist/vani.cyr`; tag 1.2.8 before the cyrius release that carries the fold.
+
 ## [1.2.7] — 2026-09-27
 
 ### Fixed

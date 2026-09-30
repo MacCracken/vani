@@ -2127,14 +2127,54 @@ fn test_ioctl_failure_maps_to_prepare_start_resume() {
     var _ct6, _cv6 = vani_resume(d);
     assert_eq(vani_err_code(_cv6),
       VANI_ERR_PREPARE, "resume falls back to prepare, reports PREPARE");
-    assert_lt(vani_drain(d), 0, "drain propagates the raw negative");
-    assert_lt(vani_drop(d),  0, "drop propagates the raw negative");
+    return 0;
+}
+
+# drain / drop / state return a Result on EVERY path (1.2.8). Before,
+# the live path returned the raw audio_* integer, so a two-value bind
+# read that integer as the TAG. These rows bind `var t, v =` on a
+# non-null handle, i.e. the live path, not the d == 0 guard.
+fn test_drain_drop_state_are_results_on_the_live_path() {
+    var d = _test_bad_fd_device();
+    var dt, dv = vani_drain(d);
+    assert_eq(is_err_result(dt), 1, "live drain failure is an Err tag");
+    if (is_err_result(dt) == 1) {
+        assert_eq(vani_err_code(dv), VANI_ERR_DRAIN,
+          "DRAIN ioctl failure → VANI_ERR_DRAIN");
+    }
+    var pt, pv = vani_drop(d);
+    assert_eq(is_err_result(pt), 1, "live drop failure is an Err tag");
+    if (is_err_result(pt) == 1) {
+        assert_eq(vani_err_code(pv), VANI_ERR_DROP,
+          "DROP ioctl failure → VANI_ERR_DROP");
+    }
+    # A failed STATUS query is still an answer: Ok(-1), which
+    # vani_state_typed reports as VANI_STATE_UNKNOWN.
+    var st, sv = vani_state(d);
+    assert_eq(is_ok(st), 1, "live state query is an Ok tag");
+    assert_eq(sv, 0 - 1, "STATUS ioctl failure → Ok payload -1");
+    assert_eq(vani_state_from_raw(sv), VANI_STATE_UNKNOWN,
+      "the Ok payload maps to VANI_STATE_UNKNOWN");
+    # The null guard keeps its code through the same two-value bind.
+    var nt, nv = vani_drain(0);
+    assert_eq(is_err_result(nt), 1, "vani_drain(0) is an Err tag");
+    if (is_err_result(nt) == 1) {
+        assert_eq(vani_err_code(nv), VANI_ERR_DEVICE_INVALID,
+          "vani_drain(0) → VANI_ERR_DEVICE_INVALID");
+    }
+    var ot, ov = vani_drop(0);
+    assert_eq(is_err_result(ot), 1, "vani_drop(0) is an Err tag");
+    var qt, qv = vani_state(0);
+    assert_eq(is_err_result(qt), 1, "vani_state(0) is an Err tag");
+    if (is_err_result(qt) == 1) {
+        assert_eq(vani_err_code(qv), VANI_ERR_DEVICE_INVALID,
+          "vani_state(0) → VANI_ERR_DEVICE_INVALID");
+    }
     return 0;
 }
 
 fn test_state_query_failure_is_unknown() {
     var d = _test_bad_fd_device();
-    assert_eq(vani_state(d), 0 - 1, "STATUS ioctl failure → raw -1");
     assert_eq(vani_state_typed(d), VANI_STATE_UNKNOWN,
       "raw -1 maps to VANI_STATE_UNKNOWN");
     assert_eq(audio_is_running(vani_audio_handle(d)), 0,
@@ -2506,7 +2546,7 @@ fn test_error_emitters_are_safe_for_every_code() {
     vani_observability_disable();
     var c = 0;
     while (c < 25) {
-        _sk_emit_err(c);
+        _vani_sk_emit_err(c);
         c = c + 1;
     }
     assert_eq(1, 1, "disabled emitter is a no-op for every code");
@@ -2861,6 +2901,7 @@ fn main() {
     test_ioctl_failure_maps_to_hw_and_sw_params();
     test_ioctl_failure_maps_to_prepare_start_resume();
     test_state_query_failure_is_unknown();
+    test_drain_drop_state_are_results_on_the_live_path();
     test_write_failure_without_xrun_is_write_err();
     test_negotiate_failure_maps_to_hw_params();
     test_audio_avail_reports_room_on_linux();

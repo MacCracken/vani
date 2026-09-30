@@ -67,13 +67,10 @@ fn main() {
     fmt_int(audio_fd(vani_audio_handle(d)));
     _puts("\n");
 
-    # NOTE (1.2.3, cyrius 6.6.0 value form): these read the raw ALSA state
-    # via audio_get_state() rather than vani_state(). vani_state() is a
-    # MIXED-return fn — an Err PAIR on its `d == 0` guard, a raw i64 state
-    # otherwise — so under the value form a single-variable bind of it is
-    # refused. On this path `d` came from a successful open and is non-null,
-    # so the direct call is exactly what vani_state() would have returned,
-    # with no ambiguity between "state 1" and "Err". CHANGELOG [1.2.3].
+    # NOTE: these read the raw ALSA state via audio_get_state(), the value
+    # vani_state() carries as its Ok payload (`var t, st = vani_state(d);`,
+    # a Result on every path since 1.2.8). `d` came from a successful open
+    # and is non-null, so the direct call needs no tag. CHANGELOG [1.2.8].
     # 2. Initial state — fresh-open should be OPEN (0).
     var st0 = audio_get_state(vani_audio_handle(d));
     _puts("  state-after-open: ");
