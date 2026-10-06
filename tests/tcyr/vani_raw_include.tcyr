@@ -1,0 +1,26 @@
+# tests/tcyr/vani_raw_include.tcyr — dist/vani.cyr is raw-includable.
+#
+# Includes the published bundle and nothing of vani's src/: since the
+# cyrius 6.6.18 distlib the bundle opens with a compile-verified
+# "# Requires" block (one include per dist/vani.deps leaf), so a consumer
+# that writes `include "dist/vani.cyr"` alone gets a program that
+# compiles. The 1.2.8 bundle had no such block and this file failed to
+# compile against it (yukti / sakshi / patra / str / fs undefined).
+# CHANGELOG [1.2.9].
+
+include "dist/vani.cyr"
+include "lib/assert.cyr"
+
+fn main() {
+    var f = vani_format_cd();
+    assert(f != 0, "vani_format_cd allocates");
+    assert_eq(vani_format_rate(f), VANI_RATE_44K, "cd rate");
+    assert_eq(vani_format_channels(f), 2, "cd channels");
+    assert_eq(vani_format_bit_depth(f), 16, "cd bit depth");
+    var failed = assert_summary();
+    if (failed > 0) { return 1; }
+    return 0;
+}
+
+var ec = main();
+sys_exit(ec);

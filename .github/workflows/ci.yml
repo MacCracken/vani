@@ -207,6 +207,21 @@ jobs:
       - name: Test
         run: cyrius test tests/tcyr/vani.tcyr
 
+      - name: Raw-include the bundle
+        # dist/vani.cyr must compile with nothing but its own "# Requires"
+        # block (cyrius >= 6.6.18 distlib). Run OUTSIDE the repo under a
+        # manifest with no [deps]: in-tree, `cyrius test` auto-prepends
+        # vani's [deps] stdlib, and the 1.2.8 bundle (no requires block)
+        # passes there while failing here. CHANGELOG [1.2.9].
+        run: |
+          pin="$(grep -oP '(?<=^cyrius = ")[^"]+' cyrius.cyml)"
+          d="$(mktemp -d)"
+          mkdir -p "$d/dist" "$d/tests/tcyr"
+          cp dist/vani.cyr "$d/dist/"
+          cp tests/tcyr/vani_raw_include.tcyr "$d/tests/tcyr/"
+          printf '[package]\nname = "vani-raw-include"\nversion = "0.0.0"\nlanguage = "cyrius"\ncyrius = "%s"\n' "$pin" > "$d/cyrius.cyml"
+          (cd "$d" && cyrius test tests/tcyr/vani_raw_include.tcyr)
+
       - name: Bench
         # Bench results land on stdout; CI only verifies the suite
         # runs without crashing. Trend tracking lives in
