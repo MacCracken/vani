@@ -48,14 +48,20 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      # vani 0.9.9: now ALL-STDLIB — yukti/patra folded into cyrius 6.4.3,
-      # so there are no git deps and no committed cyrius.lock (matches the
-      # sakshi/bayan pattern). The supply chain is pinned by the cyrius
-      # toolchain version, so the old lock-present guard + `deps --verify`
-      # (which anchored the [deps.yukti]/[deps.patra] git overrides) are
-      # retired. `cyrius deps` is a no-op here but kept for parity.
+      # vani is ALL-STDLIB (yukti/patra folded into cyrius 6.4.3; no git
+      # deps), and cyrius.lock IS committed: since cyrius 6.5.16 `cyrius
+      # deps` locks the stdlib snapshot it vendors into lib/ (45 leaves at
+      # the 6.7.5 pin). This step used to say no lock was committed while
+      # one was, and that lock had gone stale: 112 rows, 67 of them for
+      # leaves the pin does not vendor, written from a lib/ that was never
+      # cleared. `--verify` now hashes the fresh lib/ against the committed
+      # lock (the stale one: 24 verified, 88 failed), so a stale lock fails
+      # here. On a pin move regenerate it from an empty lib/:
+      # `rm -rf lib && cyrius deps`. Fixed at 1.2.10.
       - name: Resolve dependencies
-        run: cyrius deps
+        run: |
+          cyrius deps
+          cyrius deps --verify
 
       - name: Lint
         # Auto-discover so new modules are covered without editing CI.

@@ -11,13 +11,8 @@ include "lib/string.cyr"
 include "lib/sakshi.cyr"
 include "lib/result.cyr"
 include "lib/patra.cyr"
-include "lib/str.cyr"
 include "lib/io.cyr"
 include "lib/freelist.cyr"
-include "lib/chrono.cyr"
-include "lib/fs.cyr"
-include "lib/hashmap.cyr"
-include "lib/process.cyr"
 
 # --- alsa.cyr ---
 

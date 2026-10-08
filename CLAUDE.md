@@ -92,7 +92,8 @@ for the historical plan.
   `freelist`, `process`, `chrono`, `sakshi`, and — since the **0.9.9
   all-stdlib cut** (cyrius ≥ 6.4.3 bundles vani/yukti/patra) — `yukti`,
   `patra`, plus patra's transitive `atomic` / `sync` / `thread_local`.
-  There are **no git-override deps** anymore (and no `cyrius.lock`).
+  There are **no git-override deps** anymore (the committed
+  `cyrius.lock` records the stdlib snapshot — see below).
   `chrono` (added 0.9.6) is a transitive yukti requirement
   (`clock_epoch_secs`), not called by vani's own modules.
 - **Yukti** (now stdlib) — provides the audio enumerator surface vani's
@@ -129,10 +130,15 @@ Never edit `lib/*.cyr` by hand. If stdlib needs a fix, fix it in
 the `cyrius` repo, cut a release, bump `cyrius = "x.y.z"` in
 `cyrius.cyml`, re-run `cyrius deps`.
 
-There is **no `cyrius.lock`** — it was dropped at the 0.9.9 all-stdlib
-cut along with the git overrides it anchored. With zero git deps, the
-supply chain is pinned by the `cyrius = "x.y.z"` toolchain version alone
-(matches the all-stdlib pattern of `sakshi` / `bayan`).
+`cyrius.lock` **is committed** and records the stdlib snapshot that
+`cyrius deps` vendors into `lib/` (one row per leaf; cyrius ≥ 6.5.16 locks
+the stdlib too). With zero git deps the supply chain is still pinned by
+the `cyrius = "x.y.z"` toolchain version; the lock makes the vendored
+leaves checkable, and CI runs `cyrius deps --verify` against it. On every
+pin move regenerate it from an empty `lib/` (`rm -rf lib && cyrius deps`)
+— a `lib/` carried over from an older pin leaves rows for leaves the new
+pin no longer vendors. (This paragraph read "there is no `cyrius.lock`"
+from 0.9.9 while one was committed, and went stale; corrected at 1.2.10.)
 
 ## Quick Start
 

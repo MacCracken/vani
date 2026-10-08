@@ -54,10 +54,12 @@ jobs:
           echo "$HOME/.cyrius/bin" >> $GITHUB_PATH
           echo "CYRIUS_HOME=$HOME/.cyrius" >> $GITHUB_ENV
 
-      # vani 0.9.9: all-stdlib (no git deps, no committed lock) — the
-      # `deps --verify` lock-integrity step is retired (see ci.yml).
+      # All-stdlib (no git deps); the committed cyrius.lock records the
+      # stdlib snapshot and is verified against the fresh lib/ (see ci.yml).
       - name: Resolve deps
-        run: cyrius deps
+        run: |
+          cyrius deps
+          cyrius deps --verify
 
       - name: Build smoke (DCE) — x86_64
         run: |
