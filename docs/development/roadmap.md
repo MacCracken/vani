@@ -42,13 +42,25 @@ completed work — don't duplicate it here. Latest audit at
       stereo playback only. Nothing was heard, and capture (including
       `busy_open`'s capture half, which needs an ACL on `pcmC1D0c`), S24_LE and
       the non-default formats remain unexercised.
-- [ ] **PCM and control descriptors are opened without `O_CLOEXEC`** (1.2.6
-      audit L-2). True since v0.1.0. A consumer that forks and execs leaks the
-      descriptor into the child, which keeps the PCM busy after the parent closes
-      its handle; since 1.2.6 the parent's reopen fails at once instead of
-      hanging, but the device stays unavailable until the child exits. Adding
-      `O_CLOEXEC` to `_audio_open_pcm` and the mixer open changes what a child
-      inherits, so it gets its own decision rather than riding a patch.
+
+*Closed at 1.2.10:* the PCM and control descriptors are opened `O_CLOEXEC`
+(1.2.6 audit L-2, which held it for its own decision; the cyrius W2
+stdlib-wave plan placed it in 1.2.10). See CHANGELOG [1.2.10].
+
+## Next minor — 1.3.0
+
+Public-surface changes the 6.7.x toolchain allows, held for a minor because
+each changes a public declaration (ADR 0002 freezes the `vani_*` surface):
+
+- [ ] **`: bool` predicates.** `vani_ring_is_empty`, `vani_ring_is_full`,
+      `vani_observability_is_enabled`, `vani_err_is_recoverable`,
+      `vani_format_is_supported` and `audio_is_running` (and the private
+      `_hwp_mask_has_bit` / `_hwp_interval_is_empty`) answer 1 / 0 today.
+      `audio_can_set_params` is not one: it keeps its 1 / 0 / negative
+      contract. Refresh both API snapshots in the same release.
+- [ ] **if-expressions** (cyrius 6.7.4) where a two-arm `var x = a; if (c)
+      { x = b; }` is clearer as one expression — optional, by taste, never a
+      sweep for its own sake.
 
 ## Declined
 
@@ -88,12 +100,9 @@ remains open; the cyrius stdlib fold-in is complete.
       Skipped for the 0.9.0 P(-1) sweep because reproducing CPU
       contention reliably needs more setup than fits a release
       gate.
-- [ ] **Portable `_clock_monotonic()` helper** for
-      `programs/throughput.cyr` / `programs/latency_test.cyr` —
-      currently x86_64-only via raw `syscall(228, ...)`. Either
-      add a small `#ifdef`-dispatched local helper or upstream
-      `sys_clock_gettime` to the cyrius stdlib. Lands when an
-      aarch64 dev host with real audio HW becomes available.
+- *Closed at 1.2.10:* `programs/throughput.cyr` / `programs/latency_test.cyr`
+  time with the stdlib `clock_now_ns()` instead of a raw `syscall(228, ...)`
+  (the portable-clock item that stood here).
 
 ## Hardware coverage (HW-gated)
 
@@ -190,48 +199,3 @@ a public CVE drops against ALSA core / sound/pcm / sound/control
 that scores ≥ 7.0. The cadence is calendar-loose: trigger is
 "new release approaching" or "new CVE landed", not a fixed
 date.
-
----
-
-## Moving the cyrius pin to 6.6.6
-
-**Current pin:** `cyrius = "6.6.2"` (`cyrius.cyml`).
-
-**vani needs the pin bump and nothing else.**
-
-The headline item in 6.6.6 — the PE `O_APPEND` / `O_TRUNC` data corruption —
-cannot reach vani by construction: [ADR 0003](../adr/0003-no-windows-pe-target.md)
-rules Windows/PE out as a target (Accepted 2026-08-20), and the tree carries zero
-`CYRIUS_TARGET_WIN` guards to contradict it. vani's file I/O is device nodes only
-and uses no `O_APPEND` or `O_TRUNC` at all: `src/alsa.cyr:652` (`_audio_open_pcm`,
-the one PCM open for both directions — `O_WRONLY` or `O_RDONLY`, `| O_NONBLOCK`,
-then an `F_SETFL` clear; see [ADR 0005](../adr/0005-nonblocking-pcm-open.md)),
-`src/mixer.cyr:97` (`O_RDWR`, with the 3-arg Linux shape spelled out in the
-comment above it). No `file_write_all`, no `file_read_all`, no `file_exists`.
-
-Everything 6.6.6 turns into a new compile error was checked and is absent: 0
-structs (so neither the different-struct-copy error nor the by-value >8 B
-deep-copy change has a site), 0 `async fn`, 0 `operator` fns, 0 `ret2` / `rethi`,
-no SIMD intrinsics, no `: cstring` params. No `var` inside a top-level block. No
-own `vec_*` definitions, so `assert.cyr`'s new transitive `vec.cyr` include cannot
-collide. No raw `SYS_STATFS`.
-
-Two things that look like findings and are not:
-
-- The `ec` global appears in seven `programs/*.cyr` files (`caps`, `devices`,
-  `latency_test`, `mixer_test`, `play_tone`, `probe`, `throughput`). Those are
-  seven separate entry points, never co-linked, so 6.6.6's "a later redeclaration
-  now wins everywhere from program start" flip and the new
-  different-type-co-linked-global error do not apply.
-- `lib/regression.cyr` is vendored, but vani calls no `regression_*` verb anywhere
-  in `src/` or `programs/` and `regression` is not in `[deps].stdlib` — so
-  6.6.6's exec deadline (`CYRIUS_CHECK_TIMEOUT`, `-2` on timeout) and
-  `PR_SET_PDEATHSIG` changes to that module are inert here. If the copy is ever
-  refreshed it now needs `lib/io.cyr` alongside it, which is already vendored.
-
-`lib/` holds no symlinks. `cyrius.lock` is absent; 6.6.6 makes `cyrius deps` fail
-hard when the lock cannot be written rather than carrying on, so run `cyrius deps`
-once after the bump and confirm it lands.
-
-After that: `cyrius test`, and the usual hardware pass on a real ALSA device since
-nothing in CI exercises the ioctl paths.
