@@ -26,13 +26,6 @@ enum ThroughputCfg {
     THRU_DURATION_MS = 200;
 }
 
-# clock_gettime(CLOCK_MONOTONIC, &ts) — match lib/bench.cyr.
-fn _now_ns() {
-    var ts[16];
-    syscall(228, 1, &ts);
-    return load64(&ts) * 1000000000 + load64(&ts + 8);
-}
-
 fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 
 fn main() {
@@ -60,9 +53,9 @@ fn main() {
     var buf = alloc(bytes);
     memset(buf, 0, bytes);
 
-    var t0 = _now_ns();
+    var t0 = clock_now_ns();
     var play_res_tag, play_res = vani_play(d, buf, frames);
-    var t1 = _now_ns();
+    var t1 = clock_now_ns();
 
     if (is_ok(play_res_tag) == 0) {
         _puts("play: FAIL — ");
@@ -73,7 +66,7 @@ fn main() {
     }
     var written = play_res;
     vani_drain(d);
-    var t2 = _now_ns();
+    var t2 = clock_now_ns();
 
     _puts("  frames written: ");
     fmt_int(written);

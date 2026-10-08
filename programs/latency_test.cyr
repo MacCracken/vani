@@ -32,12 +32,6 @@ enum LatencyPreset {
     LAT_PRESET_CASUAL      = 1;
 }
 
-fn _now_ns() {
-    var ts[16];
-    syscall(228, 1, &ts);
-    return load64(&ts) * 1000000000 + load64(&ts + 8);
-}
-
 fn _puts(s) { sys_write(1, s, strlen(s)); return 0; }
 
 # Apply the selected preset. Direct calls, so the Result pair reaches the
@@ -88,9 +82,9 @@ fn _run_preset(label, preset_id) {
     var buf = alloc(bytes);
     memset(buf, 0, bytes);
 
-    var t0 = _now_ns();
+    var t0 = clock_now_ns();
     var play_res_tag, play_res = vani_play(d, buf, frames);
-    var t1 = _now_ns();
+    var t1 = clock_now_ns();
     if (is_ok(play_res_tag) == 0) {
         _puts("play: FAIL\n");
         vani_close(d);
@@ -98,7 +92,7 @@ fn _run_preset(label, preset_id) {
     }
     var written = play_res;
     vani_drain(d);
-    var t2 = _now_ns();
+    var t2 = clock_now_ns();
 
     _puts("  frames written: ");
     fmt_int(written);
