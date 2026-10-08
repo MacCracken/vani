@@ -2644,7 +2644,14 @@ fn test_open_flag_literals() {
     assert_eq(O_RDONLY, 0, "O_RDONLY");
     assert_eq(O_WRONLY, 1, "O_WRONLY");
     assert_eq(O_NONBLOCK, 2048, "O_NONBLOCK is 04000");
+    assert_eq(O_CLOEXEC, 524288, "O_CLOEXEC is 02000000");
     return 0;
+}
+
+# 1 when `fd` has FD_CLOEXEC set: fcntl(fd, F_GETFD) & FD_CLOEXEC, both 1
+# on every Linux arch (asm-generic/fcntl.h).
+fn _test_fd_cloexec(fd) {
+    return syscall(SYS_FCNTL, fd, 1, 0) & 1;
 }
 
 # Creates this process's FIFO at `path`; returns 1, or asserts and returns
@@ -2691,6 +2698,7 @@ fn test_open_pcm_returns_blocking_fd() {
     assert(fl >= 0, "F_GETFL on the read fd");
     assert_eq(fl & O_NONBLOCK, 0, "read fd is blocking");
     assert_eq(fl & 3, O_RDONLY, "read fd keeps O_RDONLY");
+    assert_eq(_test_fd_cloexec(rd), 1, "read fd is close-on-exec");
 
     # Playback direction. `rd` is a reader now, so this one opens too.
     var w = _audio_open_pcm(&path, O_WRONLY);
@@ -2699,10 +2707,29 @@ fn test_open_pcm_returns_blocking_fd() {
     assert(fl >= 0, "F_GETFL on the write fd");
     assert_eq(fl & O_NONBLOCK, 0, "write fd is blocking");
     assert_eq(fl & 3, O_WRONLY, "write fd keeps O_WRONLY");
+    assert_eq(_test_fd_cloexec(w), 1, "write fd is close-on-exec");
 
     _test_watchdog(0);
     if (w >= 0) { sys_close(w); }
     if (rd >= 0) { sys_close(rd); }
+    sys_unlink(&path);
+    return 0;
+}
+
+# The mixer's control-node open is close-on-exec too (1.2.10). A FIFO
+# stands in for /dev/snd/controlC{N}: an O_RDWR open of one never waits.
+fn test_ctl_open_is_cloexec() {
+    var path[64];
+    if (_test_make_fifo(&path) == 0) { return 0; }
+    _test_watchdog(10);
+    var fd = _vani_ctl_open(&path);
+    _test_watchdog(0);
+    assert(fd >= 0, "control open succeeds");
+    if (fd >= 0) {
+        assert_eq(syscall(SYS_FCNTL, fd, AUDIO_F_GETFL, 0) & 3, 2, "control fd is read-write");
+        assert_eq(_test_fd_cloexec(fd), 1, "control fd is close-on-exec");
+        sys_close(fd);
+    }
     sys_unlink(&path);
     return 0;
 }
@@ -2920,6 +2947,7 @@ fn main() {
     test_open_flag_literals();
     test_open_pcm_fails_at_once_when_busy();
     test_open_pcm_returns_blocking_fd();
+    test_ctl_open_is_cloexec();
 
     # The exit status is the verdict `cyrius test` and CI read. Through
     # 1.2.5 it was always 0: the failure count went unused. 1 on any

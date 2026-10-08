@@ -81,6 +81,26 @@ fn _vani_ctl_path(card): i64 {
 # Open / close
 # ================================================================
 
+# Open the control node at `path` read-write and close-on-exec (1.2.10):
+# a consumer that spawns a child must not hand it the control fd. Linux
+# 3-arg shape: (path, O_RDWR=2, mode=0). Returns the fd or a negative
+# errno. agnos (see vani_mixer_open) and Windows have no control node,
+# and neither syscall peer names O_CLOEXEC: both refuse with -1, as
+# _audio_open_pcm does.
+fn _vani_ctl_open(path): i64 {
+    #ifdef CYRIUS_TARGET_AGNOS
+    return 0 - 1;
+    #endif
+    #ifdef CYRIUS_TARGET_WIN
+    return 0 - 1;
+    #endif
+    #ifndef CYRIUS_TARGET_AGNOS
+    #ifndef CYRIUS_TARGET_WIN
+    return sys_open(path, 2 | O_CLOEXEC, 0);
+    #endif
+    #endif
+}
+
 fn vani_mixer_open(card): i64 {
     #ifdef CYRIUS_TARGET_AGNOS
     # agnos: no control/mixer surface exists. The sovereign `snd_*`
@@ -94,7 +114,7 @@ fn vani_mixer_open(card): i64 {
     #else
     var path = _vani_ctl_path(card);
     if (path == 0) { return vani_err_result(VANI_ERR_MIXER_OPEN); }
-    var fd = sys_open(path, 2, 0); # Linux 3-arg shape: (path, O_RDWR=2, mode=0)
+    var fd = _vani_ctl_open(path);
     if (fd < 0) { return vani_err_result(VANI_ERR_MIXER_OPEN); }
     var m = alloc(16);
     store64(m, fd);
