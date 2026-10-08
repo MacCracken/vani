@@ -2209,6 +2209,26 @@ fn test_negotiate_failure_maps_to_hw_params() {
     return 0;
 }
 
+# vani_format_is_supported answers 1 or 0 and nothing else. Through 1.2.9
+# a format with rate or channels <= 0, or a device with no PCM handle,
+# got audio_can_set_params' -1 straight through — truthy, so a caller's
+# `if (vani_format_is_supported(d, f))` took the bad format as supported.
+# The three -1 rows below fail against 1.2.9.
+fn test_format_is_supported_answers_one_or_zero() {
+    var d = _test_bad_fd_device();
+    var no_rate = vani_format_new(0, 2, 16, SND_PCM_FORMAT_S16_LE);
+    assert_eq(vani_format_is_supported(d, no_rate), 0, "is_supported rate 0 → 0, not -1");
+    var no_ch = vani_format_new(48000, 0, 16, SND_PCM_FORMAT_S16_LE);
+    assert_eq(vani_format_is_supported(d, no_ch), 0, "is_supported channels 0 → 0, not -1");
+    var h = alloc(32);
+    store64(h, 0);
+    var _wt, nh = _vani_device_wrap(h, 0, 0, VANI_PLAYBACK);
+    store64(nh, 0);
+    assert_eq(vani_format_is_supported(nh, vani_format_default()), 0,
+      "is_supported device with no PCM handle → 0, not -1");
+    return 0;
+}
+
 fn test_mixer_elem_info_failure_maps_to_mixer_elem() {
     var m = alloc(16);
     store64(m, 0 - 1);
@@ -2904,6 +2924,7 @@ fn main() {
     test_drain_drop_state_are_results_on_the_live_path();
     test_write_failure_without_xrun_is_write_err();
     test_negotiate_failure_maps_to_hw_params();
+    test_format_is_supported_answers_one_or_zero();
     test_audio_avail_reports_room_on_linux();
     test_mixer_elem_info_failure_maps_to_mixer_elem();
 
